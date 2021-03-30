@@ -16,7 +16,13 @@ import './interfaces/IOracle.sol';
 
 /*
  * @dev A market for inverse perpetual swap and PIKA stablecoin.
-    Partially adapted from Alpha Finance's non-inverse swap.
+    This is partially adapted from Alpha Finance's linear perpetual swap,
+    and the key difference is this market is for inverse perpetual swap.
+    (For reference: https://www.bitmex.com/app/inversePerpetualsGuide)
+    An inverse perpetual contract is quoted in USD but margined and settled in the base asset(e.g., ETH).
+    The benefit is that users can use base asset that they likely already hold for trading, without any stablecoin exposure.
+    Traders can now obtain leveraged long or short exposure to ETH while using ETH as collateral and earning returns in ETH.
+    Please note that a long position of ETH/USD inverse contract can be viewed as a short position of USD/ETH contract.
  */
 contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeable, IPikaPerp {
   using PerpMath for uint;
@@ -47,11 +53,6 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     uint size // The total size.
   );
 
-  event Collect(
-    address indexed referrer, // The user who collects the commission fee.
-    uint amount // The amount of tokens collected.
-  );
-
   event Deposit(
     address indexed depositor, // The user who deposits insurance funds.
     uint amount // The amount of funds deposited.
@@ -68,7 +69,6 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   uint public constant BurnShort = 3;
 
   uint public constant TRADING_FEE = 0.0025e18; // 0.25% of notional value.
-  uint public constant REFERRER_COMMISSION = 0.20e18; // 20% of trading fee.
   uint public constant FUNDING_ADJUST_THRESHOLD = 1.025e18; // 2.5% threshold.
   uint public constant SAFE_THRESHOLD = 0.93e18; // 93% kill factor.
   uint public constant SPOT_MARK_THRESHOLD = 1.05e18; // 5% consistency requirement.
@@ -79,8 +79,6 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   mapping(uint => uint) public supplyOf;
   mapping(uint => uint) public longOffsetOf;
   mapping(uint => uint) public shortOffsetOf;
-  mapping(address => address) public referrerOf;
-  mapping(address => uint) public commissionOf;
 
   IERC20Upgradeable public token; // The token to settle perpetual contracts.
   IOracle public oracle; // The oracle contract to get the ideal price.
@@ -97,17 +95,17 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   uint public liquidationPerSec; // The maximum liquidation amount per second.
 
   int public shift; // the shift is added to the AMM price as to make up the funding payment.
-  int public override insurance;
-//  int public insurance;
-  int public override burden;
-//  int public burden;
+//  int public override insurance;
+  int public insurance;
+//  int public override burden;
+  int public burden;
 
   uint public maxSafeLongSlot; // The current highest slot that is safe for long positions.
   uint public minSafeShortSlot; // The current lowest slot that is safe for short positions.
 
   uint public lastPoke; // Last timestamp when the poke action happened.
-//  uint public mark; // Mark price, as measured by exponential decay TWAP of spot prices.
-  uint public override mark; // Mark price, as measured by exponential decay TWAP of spot prices.
+  uint public mark; // Mark price, as measured by exponential decay TWAP of spot prices.
+//  uint public override mark; // Mark price, as measured by exponential decay TWAP of spot prices.
 
   /// @dev Initialize a new PikaPerp smart contract instance.
   /// @param uri EIP-1155 token metadata URI path.
@@ -202,12 +200,10 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
 
   /// @dev Execute a list of actions atomically. This is the only function for traders.
   /// @param actions The list of encoded actions to execute.
-  /// @param referrer The address that refers this trader. Only relevant on the first call.
   /// @param maxPay The maximum pay value the caller is willing to commit.
   /// @param minGet The minimum get value the caller is willing to take.
   function execute(
     uint[] memory actions,
-    address referrer,
     uint maxPay,
     uint minGet
   ) public nonReentrant returns (uint pay, uint get) {
@@ -259,19 +255,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     } else if (get > pay) {
       token.safeTransfer(msg.sender, get - pay);
     }
-    address beneficiary = referrerOf[msg.sender];
-    if (beneficiary == address(0)) {
-      require(referrer != msg.sender, 'bad referrer');
-      beneficiary = referrer;
-      referrerOf[msg.sender] = referrer;
-    }
-    if (beneficiary != address(0)) {
-      uint commission = REFERRER_COMMISSION.fmul(fee);
-      commissionOf[beneficiary] = commissionOf[beneficiary].add(commission);
-      insurance = insurance.add(fee.sub(commission).toInt256());
-    } else {
-      insurance = insurance.add(fee.toInt256());
-    }
+    insurance = insurance.add(fee.toInt256());
     emit Execute(msg.sender, actions, pay, get, fee);
     // 4. Check spot price and mark price consistency.
     uint spotPx = getSpotPx();
@@ -279,12 +263,62 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     require(spotPx.fdiv(SPOT_MARK_THRESHOLD) < mark, 'slippage is too high');
   }
 
-  /// @dev Collect trading commission for the caller.
-  /// @param amount The amount of commission to collect.
-  function collect(uint amount) public nonReentrant {
-    commissionOf[msg.sender] = commissionOf[msg.sender].sub(amount);
-    token.safeTransfer(msg.sender, amount);
-    emit Collect(msg.sender, amount);
+  /// @dev Open a long position of the contract, which is equivalent to opening a short position of the inverse pair.
+  ///      For example, a long position of TOKEN/USD inverse contract can be viewed as short position of USD/TOKEN contract.
+  /// @param size The size of the contract. One contract is close to 1 USD in value.
+  /// @param minGet The minimum get value in TOKEN the caller is willing to take.
+  function openLong(uint size, uint strike, uint minGet) public returns (uint, uint) {
+    // Mint short token of USD/ETH pair
+    uint action = MintShort | (getSlot(strike) << 2) | (size << 18);
+    return execute([action], 0, minGet);
+  }
+
+  /// @dev Close a long position of the contract, which is equivalent to closing a short position of the inverse pair.
+  /// @param size The size of the contract. One contract is close to 1 USD in value.
+  /// @param maxPay The maximum pay value in TOKEN the caller is willing to commit.
+  function closeLong(uint size, uint strike, uint maxPay) public returns (uint, uint) {
+    // Burn short token of USD/ETH pair
+    uint action = BurnShort | (getSlot(strike) << 2) | (size << 18);
+    return execute([action], maxPay, 0);
+  }
+
+  /// @dev Open a SHORT position of the contract, which is equivalent to opening a long position of the inverse pair.
+  ///      For example, a short position of TOKEN/USD inverse contract can be viewed as long position of USD/TOKEN contract.
+  /// @param size The size of the contract. One contract is close to 1 USD in value.
+  /// @param maxPay The maximum pay value in TOKEN the caller is willing to commit.
+  function openShort(uint size, uint strike, uint maxPay) public returns (uint, uint) {
+    // Mint long token of USD/TOKEN pair
+  uint action = MintLong | (getSlot(strike) << 2) | (size << 18);
+    return execute([action], maxPay, 0);
+  }
+
+  /// @dev Close a long position of the contract, which is equivalent to closing a short position of the inverse pair.
+  /// @param size The size of the contract. One contract is close to 1 USD in value.
+  /// @param minGet The minimum get value in TOKEN the caller is willing to take.
+  function closeShort(uint size, uint strike, uint minGet) public returns (uint, uint) {
+    // Burn long token of USD/TOKEN pair
+    uint action = BurnLong | (getSlot(strike) << 2) | (size << 18);
+    return execute([action], 0, minGet);
+  }
+
+  /// @dev Get leverage number (multiply 100) for a given strike price
+  /// @param strike The price which leverage position will expire(gets liquidated).
+  function getLeverageFromStrike(uint256 strike) public view returns(uint) {
+    uint latestMark = getLatestMark();
+    if (latestMark > strike ) {
+      return latestMark.mul(100).div(latestMark - strike);
+    }
+    return latestMark.mul(100).div(strike - latestMark);
+  }
+
+  /// @dev Get strike price from target leverage
+  /// @param leverage The leverage(divide by 100) of the position.
+  function getStrikeFromLeverage(uint256 leverage, bool isLong) public view returns(uint) {
+    uint latestMark = getLatestMark();
+    if (isLong) {
+      return latestMark.add(latestMark.mul(100).div(leverage));
+    }
+    return latestMark.sub(latestMark.mul(100).div(leverage));
   }
 
   /// @dev Set the address to become the next governor after accepted.
@@ -364,6 +398,12 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @dev Update the mark price, computed as average spot prices with decay.
   /// @param timeElapsed The number of seconds since last mark price update.
   function _updateMark(uint timeElapsed) internal {
+    mark = getMark(timeElapsed);
+  }
+
+  /// @dev Get the mark price, computed as average spot prices with decay.
+  /// @param timeElapsed The number of seconds since last mark price update.
+  function getMark(uint timeElapsed) public view returns (uint) {
     uint total = 1e18;
     uint each = DECAY_PER_SECOND;
     while (timeElapsed > 0) {
@@ -375,7 +415,16 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     }
     uint prev = total.fmul(mark);
     uint next = uint(1e18).sub(total).fmul(getSpotPx());
-    mark = prev.add(next);
+    return prev.add(next);
+  }
+
+  /// @dev Get the latest mark price, computed as average spot prices with decay.
+  function getLatestMark() public view returns (uint) {
+    uint timeElapsed = now - lastPoke;
+    if (timeElapsed > 0) {
+      return getMark(timeElapsed);
+    }
+    return mark;
   }
 
   /// @dev Update the shift price shift factor.
