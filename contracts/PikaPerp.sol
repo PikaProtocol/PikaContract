@@ -1,5 +1,8 @@
 pragma solidity 0.6.12;
 
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 import '@openzeppelin/contracts-upgradeable/proxy/Initializable.sol';
 import '@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol';
 import '@openzeppelin/contracts-upgradeable/token/ERC20/SafeERC20Upgradeable.sol';
@@ -10,6 +13,7 @@ import '@openzeppelin/contracts-upgradeable/math/SignedSafeMathUpgradeable.sol';
 import '@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol';
 import '@openzeppelin/contracts-upgradeable/utils/SafeCastUpgradeable.sol';
 
+import './IPika.sol';
 import './PerpMath.sol';
 import './interfaces/IPikaPerp.sol';
 import './interfaces/IOracle.sol';
@@ -29,7 +33,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   using PerpMath for int;
 
   using SafeMathUpgradeable for uint;
-  using SafeERC20Upgradeable for IERC20Upgradeable;
+  using SafeERC20 for IERC20;
   using SafeCastUpgradeable for uint;
   using SafeCastUpgradeable for int;
   using SignedSafeMathUpgradeable for int;
@@ -80,7 +84,8 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   mapping(uint => uint) public longOffsetOf;
   mapping(uint => uint) public shortOffsetOf;
 
-  IERC20Upgradeable public token; // The token to settle perpetual contracts.
+  address public pika; // The address of PIKA stablecoin.
+  IERC20 public token; // The token to settle perpetual contracts.
   IOracle public oracle; // The oracle contract to get the ideal price.
   MarketStatus public status; // The current market status.
 
@@ -115,13 +120,15 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @param _reserve0 The initial virtual reserve for base tokens.
   function initialize(
     string memory uri,
-    IERC20Upgradeable _token,
+    address pika,
+    IERC20 _token,
     IOracle _oracle,
     uint _coeff,
     uint _reserve0,
     uint _liquidationPerSec
   ) public initializer {
     __ERC1155_init(uri);
+    pika = _pika;
     token = _token;
     oracle = _oracle;
     coeff = _coeff;
@@ -497,11 +504,15 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     }
   }
 
-  /// @dev Mint position tokens and returns the value of the debt involved.
+  /// @dev Mint position tokens and returns the value of the debt involved. If the strike is 0, mint PIKA stablecoin.
   /// @param ident The identifier of position tokens to mint.
   /// @param size The amount of position tokens to mint.
   function _doMint(uint ident, uint size) internal returns (uint) {
     uint strike = getStrike(ident);
+    if (strike == 0) {
+      IPika(pika).mint(msg.sender, size);
+      return 0;
+    }
     uint supply = supplyOf[ident];
     uint value = strike.fmul(supply.add(size)).sub(strike.fmul(supply));
     supplyOf[ident] = supply.add(size);
@@ -514,6 +525,10 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @param size The amount of position tokens to burn.
   function _doBurn(uint ident, uint size) internal returns (uint) {
     uint strike = getStrike(ident);
+    if (strike == 0) {
+      IPika(pika).burn(size);
+      return 0;
+    }
     uint supply = supplyOf[ident];
     uint value = strike.fmul(supply).sub(strike.fmul(supply.sub(size)));
     supplyOf[ident] = supply.sub(size);
