@@ -20,13 +20,14 @@ import './interfaces/IOracle.sol';
 
 /*
  * @dev A market for inverse perpetual swap and PIKA stablecoin.
-    This is partially adapted from Alpha Finance's linear perpetual swap,
-    and the key difference is this market is for inverse perpetual swap.
+    This is partially adapted from Alpha Finance's linear perpetual swap with two key differences:
+    1. This market is for inverse perpetual swap.
     (For reference: https://www.bitmex.com/app/inversePerpetualsGuide)
     An inverse perpetual contract is quoted in USD but margined and settled in the base asset(e.g., ETH).
     The benefit is that users can use base asset that they likely already hold for trading, without any stablecoin exposure.
     Traders can now obtain leveraged long or short exposure to ETH while using ETH as collateral and earning returns in ETH.
     Please note that a long position of ETH/USD inverse contract can be viewed as a short position of USD/ETH contract.
+    2. PIKA Token is minted when opening a 1x short position and burned when closing the position.
  */
 contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeable, IPikaPerp {
   using PerpMath for uint;
@@ -100,17 +101,17 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   uint public liquidationPerSec; // The maximum liquidation amount per second.
 
   int public shift; // the shift is added to the AMM price as to make up the funding payment.
-//  int public override insurance;
-  int public insurance;
-//  int public override burden;
-  int public burden;
+  int public override insurance;
+//  int public insurance;
+  int public override burden;
+//  int public burden;
 
   uint public maxSafeLongSlot; // The current highest slot that is safe for long positions.
   uint public minSafeShortSlot; // The current lowest slot that is safe for short positions.
 
   uint public lastPoke; // Last timestamp when the poke action happened.
-  uint public mark; // Mark price, as measured by exponential decay TWAP of spot prices.
-//  uint public override mark; // Mark price, as measured by exponential decay TWAP of spot prices.
+//  uint public mark; // Mark price, as measured by exponential decay TWAP of spot prices.
+  uint public override mark; // Mark price, as measured by exponential decay TWAP of spot prices.
 
   /// @dev Initialize a new PikaPerp smart contract instance.
   /// @param uri EIP-1155 token metadata URI path.
@@ -120,7 +121,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @param _reserve0 The initial virtual reserve for base tokens.
   function initialize(
     string memory uri,
-    address pika,
+    address _pika,
     IERC20 _token,
     IOracle _oracle,
     uint _coeff,
@@ -277,7 +278,9 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   function openLong(uint size, uint strike, uint minGet) public returns (uint, uint) {
     // Mint short token of USD/ETH pair
     uint action = MintShort | (getSlot(strike) << 2) | (size << 18);
-    return execute([action], 0, minGet);
+    uint[] memory actions = new uint[](1);
+    actions[0] = action;
+    return execute(actions, 0, minGet);
   }
 
   /// @dev Close a long position of the contract, which is equivalent to closing a short position of the inverse pair.
@@ -286,7 +289,9 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   function closeLong(uint size, uint strike, uint maxPay) public returns (uint, uint) {
     // Burn short token of USD/ETH pair
     uint action = BurnShort | (getSlot(strike) << 2) | (size << 18);
-    return execute([action], maxPay, 0);
+    uint[] memory actions = new uint[](1);
+    actions[0] = action;
+    return execute(actions, maxPay, 0);
   }
 
   /// @dev Open a SHORT position of the contract, which is equivalent to opening a long position of the inverse pair.
@@ -295,8 +300,10 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @param maxPay The maximum pay value in TOKEN the caller is willing to commit.
   function openShort(uint size, uint strike, uint maxPay) public returns (uint, uint) {
     // Mint long token of USD/TOKEN pair
-  uint action = MintLong | (getSlot(strike) << 2) | (size << 18);
-    return execute([action], maxPay, 0);
+    uint action = MintLong | (getSlot(strike) << 2) | (size << 18);
+    uint[] memory actions = new uint[](1);
+    actions[0] = action;
+    return execute(actions, maxPay, 0);
   }
 
   /// @dev Close a long position of the contract, which is equivalent to closing a short position of the inverse pair.
@@ -305,7 +312,9 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   function closeShort(uint size, uint strike, uint minGet) public returns (uint, uint) {
     // Burn long token of USD/TOKEN pair
     uint action = BurnLong | (getSlot(strike) << 2) | (size << 18);
-    return execute([action], 0, minGet);
+    uint[] memory actions = new uint[](1);
+    actions[0] = action;
+    return execute(actions, 0, minGet);
   }
 
   /// @dev Get leverage number (multiply 100) for a given strike price
@@ -437,7 +446,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @dev Update the shift price shift factor.
   /// @param timeElapsed The number of seconds since last shift update.
   function _updateShift(uint timeElapsed) internal {
-    uint target = oracle.getPx();
+    uint target = oracle.getPrice();
     int change;
     if (mark.fdiv(FUNDING_ADJUST_THRESHOLD) > target) {
       change = mark.mul(timeElapsed).toInt256().mul(-1).fmul(MAX_SHIFT_CHANGE_PER_SEC);
@@ -526,7 +535,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   function _doBurn(uint ident, uint size) internal returns (uint) {
     uint strike = getStrike(ident);
     if (strike == 0) {
-      IPika(pika).burn(size);
+      IPika(pika).burn(msg.sender, size);
       return 0;
     }
     uint supply = supplyOf[ident];

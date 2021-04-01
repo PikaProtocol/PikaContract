@@ -1,20 +1,56 @@
 pragma solidity 0.6.12;
 
-import "@openzeppelin/contracts/token/ERC20/ERC20Burnable.sol";
-import "@openzeppelin/contracts/token/ERC20/ERC20Detailed.sol";
-import "@openzeppelin/contracts/access/roles/MinterRole.sol";
 import "./IPika.sol";
+import "@openzeppelin/contracts/access/AccessControl.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
-contract Pika is IPika, MinterRole, ERC20Detailed, ERC20Burnable  {
+//.----------------.  .----------------.  .----------------.  .----------------.
+//| .--------------. || .--------------. || .--------------. || .--------------. |
+//| |   ______     | || |     _____    | || |  ___  ____   | || |      __      | |
+//| |  |_   __ \   | || |    |_   _|   | || | |_  ||_  _|  | || |     /  \     | |
+//| |    | |__) |  | || |      | |     | || |   | |_/ /    | || |    / /\ \    | |
+//| |    |  ___/   | || |      | |     | || |   |  __'.    | || |   / ____ \   | |
+//| |   _| |_      | || |     _| |_    | || |  _| |  \ \_  | || | _/ /    \ \_ | |
+//| |  |_____|     | || |    |_____|   | || | |____||____| | || ||____|  |____|| |
+//| |              | || |              | || |              | || |              | |
+//| '--------------' || '--------------' || '--------------' || '--------------' |
+//'----------------'  '----------------'  '----------------'  '----------------'
 
-    constructor()
-    ERC20Detailed("PIKA", "PIKA", 18)
-    public
-    { }
 
-    function mint(address account, uint256 amount) public onlyMinter returns (bool) {
-        _mint(account, amount);
-        return true;
+/*
+ * @dev PIKA Stablecoin
+ */
+contract Pika is IPika, ERC20, AccessControl {
+    string public constant NAME = "Pika";
+    string public constant SYMBOL = "PIKA";
+    bytes public constant EIP712_REVISION = bytes("1");
+    bytes32 internal constant EIP712_DOMAIN = keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+    bytes32 public constant PERMIT_TYPEHASH = keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)");
+    bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
+    bytes32 public constant BURNER_ROLE = keccak256("BURNER_ROLE");
+
+    bytes32 public DOMAIN_SEPARATOR;
+    mapping(address => uint256) public nonces;
+
+    constructor(uint256 chainId) ERC20(NAME, SYMBOL) public {
+        DOMAIN_SEPARATOR = keccak256(abi.encode(
+                EIP712_DOMAIN,
+                keccak256(bytes(NAME)),
+                keccak256(EIP712_REVISION),
+                chainId,
+                address(this)
+            ));
+        _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
+    }
+
+    function mint(address to, uint256 amount) public override {
+        require(hasRole(MINTER_ROLE, msg.sender), "Caller is not a minter");
+        _mint(to, amount);
+    }
+
+    function burn(address from, uint256 amount) public override {
+        require(hasRole(BURNER_ROLE, msg.sender), "Caller is not a burner");
+        _burn(from, amount);
     }
 
     /**
@@ -39,18 +75,15 @@ contract Pika is IPika, MinterRole, ERC20Detailed, ERC20Burnable  {
         require(owner != address(0), "INVALID_OWNER");
         //solium-disable-next-line
         require(block.timestamp <= deadline, "INVALID_EXPIRATION");
-        uint256 currentValidNonce = _nonces[owner];
         bytes32 digest = keccak256(
             abi.encodePacked(
                 "\x19\x01",
                 DOMAIN_SEPARATOR,
                 keccak256(
-                    abi.encode(PERMIT_TYPEHASH, owner, spender, value, currentValidNonce, deadline))
+                    abi.encode(PERMIT_TYPEHASH, owner, spender, value, nonces[owner]++, deadline))
             )
         );
-
         require(owner == ecrecover(digest, v, r, s), "INVALID_SIGNATURE");
-        _nonces[owner] = currentValidNonce.add(1);
         _approve(owner, spender, value);
     }
 }

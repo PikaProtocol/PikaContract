@@ -1,11 +1,12 @@
 pragma solidity 0.6.12;
 
-import '@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol';
+import '@openzeppelin/contracts/token/ERC20/ERC20.sol';
 
-contract SimpleERC20 is ERC20Upgradeable {
-    constructor() public {
-        __ERC20_init('MOCK', 'MOCK');
-    }
+contract SimpleERC20 is ERC20 {
+    constructor()
+    ERC20('TEST', 'TEST')
+    public
+    { }
 
     function mint(address to, uint amount) public {
         _mint(to, amount);
