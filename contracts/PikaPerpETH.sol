@@ -73,6 +73,14 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   uint public constant MintShort = 2;
   uint public constant BurnShort = 3;
 
+  uint public constant TRADING_FEE = 0.0025e18; // 0.25% of notional value.
+  uint public constant FUNDING_ADJUST_THRESHOLD = 1.025e18; // 2.5% threshold.
+  uint public constant SAFE_THRESHOLD = 0.93e18; // 93% kill factor.
+  uint public constant SPOT_MARK_THRESHOLD = 1.05e18; // 5% consistency requirement.
+  uint public constant DECAY_PER_SECOND = 0.998e18; // 99.8% exponential TWAP decay.
+  uint public constant MAX_SHIFT_CHANGE_PER_SEC = uint(0.01e18) / uint(1 days); // 1% per day cap.
+  uint public constant MAX_POKE_ELAPSED = 1 hours; // 1 hour cap.
+
   mapping(uint => uint) public supplyOf;
   mapping(uint => uint) public longOffsetOf;
   mapping(uint => uint) public shortOffsetOf;
@@ -82,23 +90,15 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   IOracle public oracle; // The oracle contract to get the ideal price.
   MarketStatus public status; // The current market status.
 
-  uint public tradingFee; // example: 0.0025e18, 0.25% of notional value.
-  uint public fundingAdjustThreshold; // example: 1.025e18, 2.5% threshold.
-  uint public safeThreshold; // example: 93% kill factor for liquidation.
-  uint public spotMarkThreshold; // example: 1.05e18, 5% consistency requirement.
-  uint public decayPerSecond; // example: 0.998e18, 99.8% exponential TWAP decay.
-  uint public maxShiftChangePerSecond; // example: uint(0.01e18) / uint(1 days),  1% per day cap.
-  uint public maxPokeElapsed; // 1 hour cap.
+  address public governor;
+  address public pendingGovernor;
+  address public guardian;
+  address public pendingGuardian;
 
   uint public reserve0; // The initial virtual reserve for base tokens.
   uint public coeff; // The coefficient factor controlling price slippage.
   uint public reserve; // The current reserve for base tokens.
   uint public liquidationPerSec; // The maximum liquidation amount per second.
-
-  address public governor;
-  address public pendingGovernor;
-  address public guardian;
-  address public pendingGuardian;
 
   int public shift; // the shift is added to the AMM price as to make up the funding payment.
   int public override insurance;
@@ -124,13 +124,6 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     address _pika,
     IERC20 _token,
     IOracle _oracle,
-    uint _tradingFee,
-    uint _fundingAdjustThreshold,
-    uint _safeThreshold,
-    uint _spotMarkThreshold,
-    uint _decayPerSecond,
-    uint _maxShiftChangePerSecond,
-    uint _maxPokeElapsed,
     uint _coeff,
     uint _reserve0,
     uint _liquidationPerSec
@@ -139,19 +132,10 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     pika = _pika;
     token = _token;
     oracle = _oracle;
-    // ===== Parameters Start ======
-    tradingFee = _tradingFee;
-    fundingAdjustThreshold = _fundingAdjustThreshold;
-    safeThreshold = _safeThreshold;
-    spotMarkThreshold = _spotMarkThreshold;
-    decayPerSecond = _decayPerSecond;
-    maxShiftChangePerSecond = _maxShiftChangePerSecond;
-    maxPokeElapsed = _maxPokeElapsed;
     coeff = _coeff;
     reserve0 = _reserve0;
     reserve = _reserve0;
     liquidationPerSec = _liquidationPerSec;
-    // ===== Parameters end ======
     lastPoke = now;
     guardian = msg.sender;
     governor = msg.sender;
@@ -163,11 +147,57 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     _moveSlots();
   }
 
+  /// @dev Return the active ident (slot with offset) for the given long price slot.
+  /// @param slot The price slot to query.
+  function getLongIdent(uint slot) public view returns (uint) {
+    require(slot < (1 << 16), 'bad slot data');
+    return (1 << 255) | (longOffsetOf[slot] << 16) | slot;
+  }
+
+  /// @dev Return the active ident (slot with offset) for the given short price slot.
+  /// @param slot The price slot to query.
+  function getShortIdent(uint slot) public view returns (uint) {
+    require(slot < (1 << 16), 'bad slot data');
+    return (shortOffsetOf[slot] << 16) | slot;
+  }
+
+  /// @dev Convert the given strike price to its slot, round down.
+  /// @param strike The strike price to convert.
+  function getSlot(uint strike) public pure returns (uint) {
+    if (strike < 100) return strike + 800;
+    uint magnitude = 1;
+    while (strike >= 1000) {
+      magnitude++;
+      strike /= 10;
+    }
+    return 900 * magnitude + strike - 100;
+  }
+
+  /// @dev Convert the given slot identifier to strike price.
+  /// @param ident The slot identifier, can be with or without the offset.
+  function getStrike(uint ident) public pure returns (uint) {
+    uint slot = ident & ((1 << 16) - 1); // only consider the last 16 bits
+    uint prefix = slot % 900; // maximum value is 899
+    uint magnitude = slot / 900; // maximum value is 72
+    if (magnitude == 0) {
+      require(prefix >= 800, 'bad prefix');
+      return prefix - 800;
+    } else {
+      return (100 + prefix) * (10**(magnitude - 1)); // never overflow
+    }
+  }
+
+  /// @dev Return the current approximate spot price of this perp market.
+  function getSpotPx() public view returns (uint) {
+    uint px = coeff.div(reserve).fdiv(reserve);
+    return px.toInt256().add(shift).toUint256();
+  }
+
   /// @dev Poke contract state update. Must be called prior to any execution.
   function poke() public {
     uint timeElapsed = now - lastPoke;
     if (timeElapsed > 0) {
-      timeElapsed = MathUpgradeable.min(timeElapsed, maxPokeElapsed);
+      timeElapsed = MathUpgradeable.min(timeElapsed, MAX_POKE_ELAPSED);
       _updateMark(timeElapsed);
       _updateShift(timeElapsed);
       _moveSlots();
@@ -218,11 +248,11 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     uint fee = 0;
     if (buy > sell) {
       uint value = _doBuy(buy - sell);
-      fee = tradingFee.fmul(value);
+      fee = TRADING_FEE.fmul(value);
       pay = pay.add(value).add(fee);
     } else if (sell > buy) {
       uint value = _doSell(sell - buy);
-      fee = tradingFee.fmul(value);
+      fee = TRADING_FEE.fmul(value);
       get = get.add(value).sub(fee);
     }
     require(pay <= maxPay, 'max pay constraint violation');
@@ -237,8 +267,8 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     emit Execute(msg.sender, actions, pay, get, fee);
     // 4. Check spot price and mark price consistency.
     uint spotPx = getSpotPx();
-    require(spotPx.fmul(spotMarkThreshold) > mark, 'slippage is too high');
-    require(spotPx.fdiv(spotMarkThreshold) < mark, 'slippage is too high');
+    require(spotPx.fmul(SPOT_MARK_THRESHOLD) > mark, 'slippage is too high');
+    require(spotPx.fdiv(SPOT_MARK_THRESHOLD) < mark, 'slippage is too high');
   }
 
   /// @dev Open a long position of the contract, which is equivalent to opening a short position of the inverse pair.
@@ -287,6 +317,26 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     return execute(actions, 0, minGet);
   }
 
+  /// @dev Get leverage number (multiply 100) for a given strike price
+  /// @param strike The price which leverage position will expire(gets liquidated).
+  function getLeverageFromStrike(uint256 strike) public view returns(uint) {
+    uint latestMark = getLatestMark();
+    if (latestMark > strike ) {
+      return latestMark.mul(100).div(latestMark - strike);
+    }
+    return latestMark.mul(100).div(strike - latestMark);
+  }
+
+  /// @dev Get strike price from target leverage
+  /// @param leverage The leverage(divide by 100) of the position.
+  function getStrikeFromLeverage(uint256 leverage, bool isLong) public view returns(uint) {
+    uint latestMark = getLatestMark();
+    if (isLong) {
+      return latestMark.add(latestMark.mul(100).div(leverage));
+    }
+    return latestMark.sub(latestMark.mul(100).div(leverage));
+  }
+
   /// @dev Set the address to become the next governor after accepted.
   /// @param addr The address to become the pending governor.
   function setPendingGovernor(address addr) public {
@@ -315,6 +365,34 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     pendingGuardian = address(0);
   }
 
+  /// @dev Set market status for this perpetual market.
+  /// @param _status The new market status.
+  function setMarketStatus(MarketStatus _status) public {
+    require(msg.sender == governor, 'not the governor');
+    status = _status;
+  }
+
+  /// @dev Update liquidity factors, using insurance fund to maintain invariants.
+  /// @param nextCoeff The new coeefficient value.
+  /// @param nextReserve0 The new reserve0 value.
+  function setLiquidity(uint nextCoeff, uint nextReserve0) public {
+    require(msg.sender == governor, 'not the governor');
+    uint nextReserve = nextReserve0.add(reserve).sub(reserve0);
+    int prevVal = coeff.div(reserve).toInt256().sub(coeff.div(reserve0).toInt256());
+    int nextVal = nextCoeff.div(nextReserve).toInt256().sub(nextCoeff.div(nextReserve0).toInt256());
+    insurance = insurance.add(prevVal).sub(nextVal);
+    coeff = nextCoeff;
+    reserve0 = nextReserve0;
+    reserve = nextReserve;
+  }
+
+  /// @dev Update max liquidation per second parameter.
+  /// @param nextLiquidationPerSec The new max liquidation parameter.
+  function setLiquidationPerSec(uint nextLiquidationPerSec) public {
+    require(msg.sender == governor, 'not the governor');
+    liquidationPerSec = nextLiquidationPerSec;
+  }
+
   /// @dev Deposit more funds to the insurance pool.
   /// @param amount The amount of funds to deposit.
   function deposit(uint amount) public nonReentrant {
@@ -339,15 +417,41 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     mark = getMark(timeElapsed);
   }
 
+  /// @dev Get the mark price, computed as average spot prices with decay.
+  /// @param timeElapsed The number of seconds since last mark price update.
+  function getMark(uint timeElapsed) public view returns (uint) {
+    uint total = 1e18;
+    uint each = DECAY_PER_SECOND;
+    while (timeElapsed > 0) {
+      if (timeElapsed & 1 != 0) {
+        total = total.fmul(each);
+      }
+      each = each.fmul(each);
+      timeElapsed = timeElapsed >> 1;
+    }
+    uint prev = total.fmul(mark);
+    uint next = uint(1e18).sub(total).fmul(getSpotPx());
+    return prev.add(next);
+  }
+
+  /// @dev Get the latest mark price, computed as average spot prices with decay.
+  function getLatestMark() public view returns (uint) {
+    uint timeElapsed = now - lastPoke;
+    if (timeElapsed > 0) {
+      return getMark(timeElapsed);
+    }
+    return mark;
+  }
+
   /// @dev Update the shift price shift factor.
   /// @param timeElapsed The number of seconds since last shift update.
   function _updateShift(uint timeElapsed) internal {
     uint target = oracle.getPrice();
     int change;
-    if (mark.fdiv(fundingAdjustThreshold) > target) {
-      change = mark.mul(timeElapsed).toInt256().mul(-1).fmul(maxShiftChangePerSecond);
-    } else if (mark.fmul(fundingAdjustThreshold) < target) {
-      change = mark.mul(timeElapsed).toInt256().fmul(maxShiftChangePerSecond);
+    if (mark.fdiv(FUNDING_ADJUST_THRESHOLD) > target) {
+      change = mark.mul(timeElapsed).toInt256().mul(-1).fmul(MAX_SHIFT_CHANGE_PER_SEC);
+    } else if (mark.fmul(FUNDING_ADJUST_THRESHOLD) < target) {
+      change = mark.mul(timeElapsed).toInt256().fmul(MAX_SHIFT_CHANGE_PER_SEC);
     } else {
       return; // nothing to do here
     }
@@ -363,7 +467,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   function _moveSlots() internal {
     // Handle long side
     uint _prevMaxSafeLongSlot = maxSafeLongSlot;
-    uint _nextMaxSafeLongSlot = getSlot(mark.fmul(safeThreshold));
+    uint _nextMaxSafeLongSlot = getSlot(mark.fmul(SAFE_THRESHOLD));
     while (_prevMaxSafeLongSlot > _nextMaxSafeLongSlot) {
       uint strike = getStrike(_prevMaxSafeLongSlot);
       uint ident = getLongIdent(_prevMaxSafeLongSlot);
@@ -377,7 +481,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     maxSafeLongSlot = _nextMaxSafeLongSlot;
     // Handle short side
     uint _prevMinSafeShortSlot = minSafeShortSlot;
-    uint _nextMinSafeShortSlot = getSlot(mark.fdiv(safeThreshold)).add(1);
+    uint _nextMinSafeShortSlot = getSlot(mark.fdiv(SAFE_THRESHOLD)).add(1);
     while (_prevMinSafeShortSlot < _nextMinSafeShortSlot) {
       uint strike = getStrike(_prevMinSafeShortSlot);
       uint ident = getShortIdent(_prevMinSafeShortSlot);
@@ -460,165 +564,4 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     reserve = nextReserve;
     return base.toInt256().add(premium).toUint256();
   }
-
-  // ============ Getter Functions ============
-
-  /// @dev Return the active ident (slot with offset) for the given long price slot.
-  /// @param slot The price slot to query.
-  function getLongIdent(uint slot) public view returns (uint) {
-    require(slot < (1 << 16), 'bad slot data');
-    return (1 << 255) | (longOffsetOf[slot] << 16) | slot;
-  }
-
-  /// @dev Return the active ident (slot with offset) for the given short price slot.
-  /// @param slot The price slot to query.
-  function getShortIdent(uint slot) public view returns (uint) {
-    require(slot < (1 << 16), 'bad slot data');
-    return (shortOffsetOf[slot] << 16) | slot;
-  }
-
-  /// @dev Convert the given strike price to its slot, round down.
-  /// @param strike The strike price to convert.
-  function getSlot(uint strike) public pure returns (uint) {
-    if (strike < 100) return strike + 800;
-    uint magnitude = 1;
-    while (strike >= 1000) {
-      magnitude++;
-      strike /= 10;
-    }
-    return 900 * magnitude + strike - 100;
-  }
-
-  /// @dev Convert the given slot identifier to strike price.
-  /// @param ident The slot identifier, can be with or without the offset.
-  function getStrike(uint ident) public pure returns (uint) {
-    uint slot = ident & ((1 << 16) - 1); // only consider the last 16 bits
-    uint prefix = slot % 900; // maximum value is 899
-    uint magnitude = slot / 900; // maximum value is 72
-    if (magnitude == 0) {
-      require(prefix >= 800, 'bad prefix');
-      return prefix - 800;
-    } else {
-      return (100 + prefix) * (10**(magnitude - 1)); // never overflow
-    }
-  }
-
-  /// @dev Return the current approximate spot price of this perp market.
-  function getSpotPx() public view returns (uint) {
-    uint px = coeff.div(reserve).fdiv(reserve);
-    return px.toInt256().add(shift).toUint256();
-  }
-
-  /// @dev Get leverage number (multiply 100) for a given strike price
-  /// @param strike The price which leverage position will expire(gets liquidated).
-  function getLeverageFromStrike(uint256 strike) public view returns(uint) {
-    uint latestMark = getLatestMark();
-    if (latestMark > strike ) {
-      return latestMark.mul(100).div(latestMark - strike);
-    }
-    return latestMark.mul(100).div(strike - latestMark);
-  }
-
-  /// @dev Get strike price from target leverage
-  /// @param leverage The leverage(divide by 100) of the position.
-  function getStrikeFromLeverage(uint256 leverage, bool isLong) public view returns(uint) {
-    uint latestMark = getLatestMark();
-    if (isLong) {
-      return latestMark.add(latestMark.mul(100).div(leverage));
-    }
-    return latestMark.sub(latestMark.mul(100).div(leverage));
-  }
-
-
-  /// @dev Get the mark price, computed as average spot prices with decay.
-  /// @param timeElapsed The number of seconds since last mark price update.
-  function getMark(uint timeElapsed) public view returns (uint) {
-    uint total = 1e18;
-    uint each = decayPerSecond;
-    while (timeElapsed > 0) {
-      if (timeElapsed & 1 != 0) {
-        total = total.fmul(each);
-      }
-      each = each.fmul(each);
-      timeElapsed = timeElapsed >> 1;
-    }
-    uint prev = total.fmul(mark);
-    uint next = uint(1e18).sub(total).fmul(getSpotPx());
-    return prev.add(next);
-  }
-
-  /// @dev Get the latest mark price, computed as average spot prices with decay.
-  function getLatestMark() public view returns (uint) {
-    uint timeElapsed = now - lastPoke;
-    if (timeElapsed > 0) {
-      return getMark(timeElapsed);
-    }
-    return mark;
-  }
-
-  // ============ Setter Functions ============
-
-  /// @dev Set market status for this perpetual market.
-  /// @param _status The new market status.
-  function setMarketStatus(MarketStatus _status) public {
-    require(msg.sender == governor, 'not the governor');
-    status = _status;
-  }
-
-  /// @dev Update liquidity factors, using insurance fund to maintain invariants.
-  /// @param nextCoeff The new coeefficient value.
-  /// @param nextReserve0 The new reserve0 value.
-  function setLiquidity(uint nextCoeff, uint nextReserve0) public {
-    require(msg.sender == governor, 'not the governor');
-    uint nextReserve = nextReserve0.add(reserve).sub(reserve0);
-    int prevVal = coeff.div(reserve).toInt256().sub(coeff.div(reserve0).toInt256());
-    int nextVal = nextCoeff.div(nextReserve).toInt256().sub(nextCoeff.div(nextReserve0).toInt256());
-    insurance = insurance.add(prevVal).sub(nextVal);
-    coeff = nextCoeff;
-    reserve0 = nextReserve0;
-    reserve = nextReserve;
-  }
-
-  /// @dev Update max liquidation per second parameter.
-  /// @param nextLiquidationPerSec The new max liquidation parameter.
-  function setLiquidationPerSec(uint nextLiquidationPerSec) public {
-    require(msg.sender == governor, 'not the governor');
-    liquidationPerSec = nextLiquidationPerSec;
-  }
-
-  function setTradingFee(uint newTradingFee) public {
-    require(msg.sender == governor, 'not the governor');
-    tradingFee = newTradingFee;
-  }
-
-  function setFundingAdjustThreshold(uint newFundingAdjustThreshold) public {
-    require(msg.sender == governor, 'not the governor');
-    fundingAdjustThreshold = fundingAdjustThreshold;
-  }
-
-  function setSafeThreshold(uint newSafeThreshold) public {
-    require(msg.sender == governor, 'not the governor');
-    safeThreshold = newSafeThreshold;
-  }
-
-  function setSpotMarkThreshold(uint newSpotMarkThreshold) public {
-    require(msg.sender == governor, 'not the governor');
-    spotMarkThreshold = newSpotMarkThreshold;
-  }
-
-  function setDecayPerSecond(uint newDecayPerSecond) public {
-    require(msg.sender == governor, 'not the governor');
-    decayPerSecond = newDecayPerSecond;
-  }
-
-  function setMaxShiftChangePerSecond(uint newMaxShiftChangePerSecond) public {
-    require(msg.sender == governor, 'not the governor');
-    maxShiftChangePerSecond = newMaxShiftChangePerSecond;
-  }
-
-  function setMaxPokeElapsed(uint newMaxPokeElapsed) public {
-    require(msg.sender == governor, 'not the governor');
-    maxPokeElapsed = newMaxPokeElapsed;
-  }
-
 }
