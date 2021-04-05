@@ -39,6 +39,14 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   using SafeCastUpgradeable for int;
   using SignedSafeMathUpgradeable for int;
 
+  modifier onlyGovernor {
+    require(
+      msg.sender == governor,
+      "Only governor can call this function."
+    );
+    _;
+  }
+
   enum MarketStatus {
     Normal, // Trading operates as normal.
     NoMint, // No minting actions allowed.
@@ -101,17 +109,17 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   address public pendingGuardian;
 
   int public shift; // the shift is added to the AMM price as to make up the funding payment.
-  int public override insurance;
-//  int public insurance;
-  int public override burden;
-//  int public burden;
+//  int public override insurance;
+  int public insurance;
+//  int public override burden;
+  int public burden;
 
   uint public maxSafeLongSlot; // The current highest slot that is safe for long positions.
   uint public minSafeShortSlot; // The current lowest slot that is safe for short positions.
 
   uint public lastPoke; // Last timestamp when the poke action happened.
-//  uint public mark; // Mark price, as measured by exponential decay TWAP of spot prices.
-  uint public override mark; // Mark price, as measured by exponential decay TWAP of spot prices.
+  uint public mark; // Mark price, as measured by exponential decay TWAP of spot prices.
+//  uint public override mark; // Mark price, as measured by exponential decay TWAP of spot prices.
 
   /// @dev Initialize a new PikaPerp smart contract instance.
   /// @param uri EIP-1155 token metadata URI path.
@@ -176,7 +184,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     }
   }
 
-  /// @dev Execute a list of actions atomically. This is the only function for traders.
+  /// @dev Execute a list of actions atomically.
   /// @param actions The list of encoded actions to execute.
   /// @param maxPay The maximum pay value the caller is willing to commit.
   /// @param minGet The minimum get value the caller is willing to take.
@@ -560,16 +568,14 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
 
   /// @dev Set market status for this perpetual market.
   /// @param _status The new market status.
-  function setMarketStatus(MarketStatus _status) public {
-    require(msg.sender == governor, 'not the governor');
+  function setMarketStatus(MarketStatus _status) public onlyGovernor {
     status = _status;
   }
 
   /// @dev Update liquidity factors, using insurance fund to maintain invariants.
   /// @param nextCoeff The new coeefficient value.
   /// @param nextReserve0 The new reserve0 value.
-  function setLiquidity(uint nextCoeff, uint nextReserve0) public {
-    require(msg.sender == governor, 'not the governor');
+  function setLiquidity(uint nextCoeff, uint nextReserve0) public onlyGovernor {
     uint nextReserve = nextReserve0.add(reserve).sub(reserve0);
     int prevVal = coeff.div(reserve).toInt256().sub(coeff.div(reserve0).toInt256());
     int nextVal = nextCoeff.div(nextReserve).toInt256().sub(nextCoeff.div(nextReserve0).toInt256());
@@ -581,43 +587,35 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
 
   /// @dev Update max liquidation per second parameter.
   /// @param nextLiquidationPerSec The new max liquidation parameter.
-  function setLiquidationPerSec(uint nextLiquidationPerSec) public {
-    require(msg.sender == governor, 'not the governor');
+  function setLiquidationPerSec(uint nextLiquidationPerSec) public onlyGovernor {
     liquidationPerSec = nextLiquidationPerSec;
   }
 
-  function setTradingFee(uint newTradingFee) public {
-    require(msg.sender == governor, 'not the governor');
+  function setTradingFee(uint newTradingFee) public onlyGovernor {
     tradingFee = newTradingFee;
   }
 
-  function setFundingAdjustThreshold(uint newFundingAdjustThreshold) public {
-    require(msg.sender == governor, 'not the governor');
+  function setFundingAdjustThreshold(uint newFundingAdjustThreshold) public onlyGovernor {
     fundingAdjustThreshold = fundingAdjustThreshold;
   }
 
-  function setSafeThreshold(uint newSafeThreshold) public {
-    require(msg.sender == governor, 'not the governor');
+  function setSafeThreshold(uint newSafeThreshold) public onlyGovernor {
     safeThreshold = newSafeThreshold;
   }
 
-  function setSpotMarkThreshold(uint newSpotMarkThreshold) public {
-    require(msg.sender == governor, 'not the governor');
+  function setSpotMarkThreshold(uint newSpotMarkThreshold) public onlyGovernor {
     spotMarkThreshold = newSpotMarkThreshold;
   }
 
-  function setDecayPerSecond(uint newDecayPerSecond) public {
-    require(msg.sender == governor, 'not the governor');
+  function setDecayPerSecond(uint newDecayPerSecond) public onlyGovernor {
     decayPerSecond = newDecayPerSecond;
   }
 
-  function setMaxShiftChangePerSecond(uint newMaxShiftChangePerSecond) public {
-    require(msg.sender == governor, 'not the governor');
+  function setMaxShiftChangePerSecond(uint newMaxShiftChangePerSecond) public onlyGovernor {
     maxShiftChangePerSecond = newMaxShiftChangePerSecond;
   }
 
-  function setMaxPokeElapsed(uint newMaxPokeElapsed) public {
-    require(msg.sender == governor, 'not the governor');
+  function setMaxPokeElapsed(uint newMaxPokeElapsed) public onlyGovernor {
     maxPokeElapsed = newMaxPokeElapsed;
   }
 
