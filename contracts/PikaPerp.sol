@@ -76,6 +76,15 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     uint amount // The amount of funds withdrawn.
   );
 
+  event LiquidityChanged(
+    uint coeff,  // coefficient factor before the change
+    uint reserve0, // initial virtual reserve for base tokens before the change
+    uint reserve, // current reserve for base tokens before the change
+    uint nextCoeff, // coefficient factor after the change
+    uint nextReserve0, // initial virtual reserve for base tokens after the change
+    uint nextReserve  // current reserve for base tokens after the change
+  );
+
   uint public constant MintLong = 0;
   uint public constant BurnLong = 1;
   uint public constant MintShort = 2;
@@ -101,7 +110,15 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   uint public reserve0; // The initial virtual reserve for base tokens.
   uint public coeff; // The coefficient factor controlling price slippage.
   uint public reserve; // The current reserve for base tokens.
+  uint public liquidityChangePerSec; // The maximum liquidity change per second.
   uint public liquidationPerSec; // The maximum liquidation amount per second.
+  uint public oIParams;
+  uint public totalOI; // The sum of open long and short positions.
+  uint public smallDecayTwapOI; // Total open interest with small exponential TWAP decay. This reflects shorter term twap.
+  uint public largeDecayTwapOI; // Total open interest with large exponential TWAP decay. This reflects longer term twap.
+  uint public smallOIDecayPerSecond; // example: 0.999999e18, 99.9999% exponential TWAP decay.
+  uint public largeOIDecayPerSecond; // example: 0.99999e18, 99.999% exponential TWAP decay.
+  uint public OIChangeThreshold; // example: 1.02e18, 105%
 
   address public governor;
   address public pendingGovernor;
@@ -109,17 +126,19 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   address public pendingGuardian;
 
   int public shift; // the shift is added to the AMM price as to make up the funding payment.
-//  int public override insurance;
+  //  int public override insurance;
   int public insurance;
-//  int public override burden;
+  //  int public override burden;
   int public burden;
 
   uint public maxSafeLongSlot; // The current highest slot that is safe for long positions.
   uint public minSafeShortSlot; // The current lowest slot that is safe for short positions.
 
+  uint public lastOIChangeTime; // Last timestamp when the open interest changes happened.
+  uint public lastLiquidityChangeTime; // Last timestamp when the liquidity changes happened.
   uint public lastPoke; // Last timestamp when the poke action happened.
   uint public mark; // Mark price, as measured by exponential decay TWAP of spot prices.
-//  uint public override mark; // Mark price, as measured by exponential decay TWAP of spot prices.
+  //  uint public override mark; // Mark price, as measured by exponential decay TWAP of spot prices.
 
   /// @dev Initialize a new PikaPerp smart contract instance.
   /// @param uri EIP-1155 token metadata URI path.
@@ -160,6 +179,8 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     reserve = _reserve0;
     liquidationPerSec = _liquidationPerSec;
     // ===== Parameters end ======
+    lastOIChangeTime = now;
+    lastLiquidityChangeTime = now;
     lastPoke = now;
     guardian = msg.sender;
     governor = msg.sender;
@@ -247,6 +268,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     uint spotPx = getSpotPx();
     require(spotPx.fmul(spotMarkThreshold) > mark, 'slippage is too high');
     require(spotPx.fdiv(spotMarkThreshold) < mark, 'slippage is too high');
+    _updateLiquidity();
   }
 
   /// @dev Open a long position of the contract, which is equivalent to opening a short position of the inverse pair.
@@ -430,6 +452,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     uint value = strike.fmul(supply.add(size)).sub(strike.fmul(supply));
     supplyOf[ident] = supply.add(size);
     _mint(msg.sender, ident, size, '');
+    _updateOI(size, true);
     return value;
   }
 
@@ -446,6 +469,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     uint value = strike.fmul(supply).sub(strike.fmul(supply.sub(size)));
     supplyOf[ident] = supply.sub(size);
     _burn(msg.sender, ident, size);
+    _updateOI(size, false);
     return value;
   }
 
@@ -468,6 +492,33 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     reserve = nextReserve;
     return base.toInt256().add(premium).toUint256();
   }
+
+  function _updateOI(uint size, bool isMint) internal {
+    totalOI = isMint ? totalOI.add(size) : totalOI.sub(size);
+    uint timeElapsed = now - lastOIChangeTime;
+    smallDecayTwapOI = smallDecayTwapOI == 0 ? totalOI : getTwapOI(timeElapsed, smallDecayTwapOI, smallOIDecayPerSecond);
+    largeDecayTwapOI = largeDecayTwapOI == 0 ? totalOI: getTwapOI(timeElapsed, largeDecayTwapOI, largeOIDecayPerSecond);
+    lastOIChangeTime = now;
+  }
+
+  function _updateLiquidity() internal {
+    uint timeElapsed = now - lastLiquidityChangeTime;
+    uint change = coeff.mul(timeElapsed).fmul(liquidityChangePerSec);
+    if (smallDecayTwapOI.fdiv(largeDecayTwapOI) > OIChangeThreshold) {
+      // Since recent OI increased, increase liquidity.
+      uint nextCoeff = coeff.add(change);
+      uint nextReserve = nextCoeff.div(coeff.div(reserve));
+      uint nextReserve0 = nextReserve.add(reserve0).sub(reserve);
+      setLiquidity(nextCoeff, nextReserve0);
+    } else if (largeDecayTwapOI.fdiv(smallDecayTwapOI) > OIChangeThreshold) {
+      // Since recent OI decreased, decrease liquidity.
+      uint nextCoeff = coeff.sub(change);
+      uint nextReserve = nextCoeff.div(coeff.div(reserve));
+      uint nextReserve0 = nextReserve.add(reserve0).sub(reserve);
+      setLiquidity(nextCoeff, nextReserve0);
+    }
+  }
+
 
   // ============ Getter Functions ============
 
@@ -537,6 +588,22 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     return latestMark.sub(latestMark.mul(100).div(leverage));
   }
 
+  /// @dev Get the total open interest, computed as average open interest with decay.
+  /// @param timeElapsed The number of seconds since last open interest update.
+  function getTwapOI(uint timeElapsed, uint prevDecayTwapOI, uint oiDecayPerSecond) public view returns (uint) {
+    uint total = 1e18;
+    uint each = oiDecayPerSecond;
+    while (timeElapsed > 0) {
+      if (timeElapsed & 1 != 0) {
+        total = total.fmul(each);
+      }
+      each = each.fmul(each);
+      timeElapsed = timeElapsed >> 1;
+    }
+    uint prev = total.fmul(prevDecayTwapOI);
+    uint next = uint(1e18).sub(total).fmul(totalOI);
+    return prev.add(next);
+  }
 
   /// @dev Get the mark price, computed as average spot prices with decay.
   /// @param timeElapsed The number of seconds since last mark price update.
@@ -580,6 +647,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     int prevVal = coeff.div(reserve).toInt256().sub(coeff.div(reserve0).toInt256());
     int nextVal = nextCoeff.div(nextReserve).toInt256().sub(nextCoeff.div(nextReserve0).toInt256());
     insurance = insurance.add(prevVal).sub(nextVal);
+    emit LiquidityChanged(coeff, reserve0, reserve, nextCoeff, nextReserve0, nextReserve);
     coeff = nextCoeff;
     reserve0 = nextReserve0;
     reserve = nextReserve;
@@ -619,4 +687,15 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     maxPokeElapsed = newMaxPokeElapsed;
   }
 
+  function setSmallOIDecayPerSecond(uint newSmallOIDecayPerSecond) public onlyGovernor {
+    smallOIDecayPerSecond = newSmallOIDecayPerSecond;
+  }
+
+  function setLargeOIDecayPerSecond(uint newLargeOIDecayPerSecond) public onlyGovernor {
+    largeOIDecayPerSecond = newLargeOIDecayPerSecond;
+  }
+
+  function setOIChangeThreshold(uint newOIChangeThreshold) public onlyGovernor {
+    OIChangeThreshold = newOIChangeThreshold;
+  }
 }
