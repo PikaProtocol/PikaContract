@@ -2,7 +2,7 @@ pragma solidity ^0.6.12;
 
 import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@chainlink/contracts/src/v0.6/interfaces/AggregatorV3Interface.sol";
-import "../interfaces/IOracle.sol";
+import "./IOracle.sol";
 
 contract ChainlinkOracle is IOracle {
     using SafeMath for uint256;

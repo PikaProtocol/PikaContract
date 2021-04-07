@@ -13,10 +13,10 @@ import '@openzeppelin/contracts-upgradeable/math/SignedSafeMathUpgradeable.sol';
 import '@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol';
 import '@openzeppelin/contracts-upgradeable/utils/SafeCastUpgradeable.sol';
 
-import './IPika.sol';
-import './PerpMath.sol';
-import './interfaces/IPikaPerp.sol';
-import './interfaces/IOracle.sol';
+import './IPikaPerp.sol';
+import '../lib/PerpMath.sol';
+import '../token/IPika.sol';
+import '../oracle/IOracle.sol';
 
 /*
  * @dev A market for inverse perpetual swap and PIKA stablecoin.
@@ -58,7 +58,10 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     uint[] actions, // The list of actions executed.
     uint pay, // The amount of tokens paid by users, including fee.
     uint get, // The amount of tokens paid to users.
-    uint fee // The fee collected to the protocol
+    uint fee, // The fee collected to the protocol.
+    uint spotPx, // The price of the virtual AMM.
+    uint mark, // The mark price.
+    uint indexPx // The oracle price.
   );
 
   event Liquidate(
@@ -109,17 +112,17 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   address public pendingGuardian;
 
   int public shift; // the shift is added to the AMM price as to make up the funding payment.
-  //  int public override insurance;
-  int public insurance;
-  //  int public override burden;
-  int public burden;
+    int public override insurance;
+//  int public insurance;
+    int public override burden;
+//  int public burden;
 
   uint public maxSafeLongSlot; // The current highest slot that is safe for long positions.
   uint public minSafeShortSlot; // The current lowest slot that is safe for short positions.
 
   uint public lastPoke; // Last timestamp when the poke action happened.
-  uint public mark; // Mark price, as measured by exponential decay TWAP of spot prices.
-  //  uint public override mark; // Mark price, as measured by exponential decay TWAP of spot prices.
+//  uint public mark; // Mark price, as measured by exponential decay TWAP of spot prices.
+    uint public override mark; // Mark price, as measured by exponential decay TWAP of spot prices.
 
   /// @dev Initialize a new PikaPerp smart contract instance.
   /// @param uri EIP-1155 token metadata URI path.
@@ -242,9 +245,9 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
       token.safeTransfer(msg.sender, get - pay);
     }
     insurance = insurance.add(fee.toInt256());
-    emit Execute(msg.sender, actions, pay, get, fee);
     // 4. Check spot price and mark price consistency.
     uint spotPx = getSpotPx();
+    emit Execute(msg.sender, actions, pay, get, fee, spotPx, mark, oracle.getPrice());
     require(spotPx.fmul(spotMarkThreshold) > mark, 'slippage is too high');
     require(spotPx.fdiv(spotMarkThreshold) < mark, 'slippage is too high');
   }
