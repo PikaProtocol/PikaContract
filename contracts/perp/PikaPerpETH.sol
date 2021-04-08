@@ -240,9 +240,9 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     require(get >= minGet, 'min get constraint violation');
     // 3. Settle tokens with the executor and collect the trading fee.
     if (pay > get) {
-      token.safeTransferFrom(msg.sender, address(this), pay - get);
+      ethTransferFromSenderToThis(pay - get);
     } else if (get > pay) {
-      token.safeTransfer(msg.sender, get - pay);
+      ethTransfer(msg.sender, get - pay);
     }
     insurance = insurance.add(fee.toInt256());
     // 4. Check spot price and mark price consistency.
@@ -329,7 +329,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @dev Deposit more funds to the insurance pool.
   /// @param amount The amount of funds to deposit.
   function deposit(uint amount) public nonReentrant {
-    token.safeTransferFrom(msg.sender, address(this), amount);
+    ethTransferFromSenderToThis(amount);
     insurance = insurance.add(amount.toInt256());
     emit Deposit(msg.sender, amount);
   }
@@ -340,7 +340,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     require(msg.sender == guardian, 'not the guardian');
     insurance = insurance.sub(amount.toInt256());
     require(insurance > 0, 'negative insurance after withdrawal');
-    token.safeTransfer(msg.sender, amount);
+    ethTransfer(msg.sender, amount);
     emit Withdraw(msg.sender, amount);
   }
 
@@ -470,6 +470,25 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     int premium = shift.fmul(nextReserve).sub(shift.fmul(reserve));
     reserve = nextReserve;
     return base.toInt256().add(premium).toUint256();
+  }
+
+  function ethTransferFromSenderToThis(uint256 amount) internal {
+    if (amount > 0) {
+      require(msg.value >= amount, "UniERC20: not enough value");
+      if (msg.value > amount) {
+        // Return remainder if exist
+        uint256 refundAmount = msg.value.sub(amount);
+        (bool success, ) = msg.sender.call{value: refundAmount}("");
+        require(success, "Transfer failed");
+      }
+    }
+  }
+
+  function ethTransfer(address payable to, uint256 amount) internal {
+    if (amount > 0) {
+      (bool success, ) = to.call{value: amount}("");
+      require(success, "Transfer failed");
+    }
   }
 
   // ============ Getter Functions ============
