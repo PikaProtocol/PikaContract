@@ -1,4 +1,6 @@
-pragma solidity ^0.6.12;
+// SPDX-License-Identifier: MIT
+
+pragma solidity >= 0.6.12;
 
 import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@chainlink/contracts/src/v0.6/interfaces/AggregatorV3Interface.sol";
