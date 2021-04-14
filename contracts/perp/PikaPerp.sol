@@ -84,22 +84,37 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   uint public constant MintShort = 2;
   uint public constant BurnShort = 3;
 
+  // Initial parameter values. Initialize the contract using these constant values
+  // to avoid stack too deep error in initialize method.
+  uint public constant TRADING_FEE = 0.0025e18; // 0.25% of notional value.
+  uint public constant REFERRER_COMMISSION = 0.10e18; // 10% of trading fee.
+  uint public constant FUNDING_ADJUST_THRESHOLD = 1.025e18; // 2.5% threshold.
+  uint public constant SAFE_THRESHOLD = 0.93e18; // 93% kill factor.
+  uint public constant SPOT_MARK_THRESHOLD = 1.05e18; // 5% consistency requirement.
+  uint public constant DECAY_PER_SECOND = 0.998e18; // 99.8% exponential TWAP decay.
+  uint public constant MAX_ALPHA_CHANGE_PER_SEC = uint(0.01e18) / uint(1 days); // 1% per day cap.
+  uint public constant MAX_POKE_ELAPSED = 1 hours; // 1 hour cap.
+
+
   mapping(uint => uint) public supplyOf;
   mapping(uint => uint) public longOffsetOf;
   mapping(uint => uint) public shortOffsetOf;
+  mapping(address => address) public referrerOf;
+  mapping(address => uint) public commissionOf;
 
   address public pika; // The address of PIKA stablecoin.
   IERC20 public token; // The token to settle perpetual contracts.
   IOracle public oracle; // The oracle contract to get the ideal price.
   MarketStatus public status; // The current market status.
 
-  uint public tradingFee; // example: 0.0025e18, 0.25% of notional value.
-  uint public fundingAdjustThreshold; // example: 1.025e18, 2.5% threshold.
-  uint public safeThreshold; // example: 93% kill factor for liquidation.
-  uint public spotMarkThreshold; // example: 1.05e18, 5% consistency requirement.
-  uint public decayPerSecond; // example: 0.998e18, 99.8% exponential TWAP decay.
-  uint public maxShiftChangePerSecond; // example: uint(0.01e18) / uint(1 days),  1% per day cap.
-  uint public maxPokeElapsed; // 1 hour cap.
+  uint public tradingFee;
+  uint public referrerCommission;
+  uint public fundingAdjustThreshold;
+  uint public safeThreshold;
+  uint public spotMarkThreshold;
+  uint public decayPerSecond;
+  uint public maxShiftChangePerSecond;
+  uint public maxPokeElapsed;
 
   uint public reserve0; // The initial virtual reserve for base tokens.
   uint public coeff; // The coefficient factor controlling price slippage.
@@ -135,13 +150,6 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     address _pika,
     IERC20 _token,
     IOracle _oracle,
-    uint _tradingFee,
-    uint _fundingAdjustThreshold,
-    uint _safeThreshold,
-    uint _spotMarkThreshold,
-    uint _decayPerSecond,
-    uint _maxShiftChangePerSecond,
-    uint _maxPokeElapsed,
     uint _coeff,
     uint _reserve0,
     uint _liquidationPerSec
@@ -151,13 +159,14 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     token = _token;
     oracle = _oracle;
     // ===== Parameters Start ======
-    tradingFee = _tradingFee;
-    fundingAdjustThreshold = _fundingAdjustThreshold;
-    safeThreshold = _safeThreshold;
-    spotMarkThreshold = _spotMarkThreshold;
-    decayPerSecond = _decayPerSecond;
-    maxShiftChangePerSecond = _maxShiftChangePerSecond;
-    maxPokeElapsed = _maxPokeElapsed;
+    tradingFee = TRADING_FEE;
+    referrerCommission = REFERRER_COMMISSION;
+    fundingAdjustThreshold = FUNDING_ADJUST_THRESHOLD;
+    safeThreshold = SAFE_THRESHOLD;
+    spotMarkThreshold = SPOT_MARK_THRESHOLD;
+    decayPerSecond = DECAY_PER_SECOND;
+    maxShiftChangePerSecond = MAX_ALPHA_CHANGE_PER_SEC;
+    maxPokeElapsed = MAX_POKE_ELAPSED;
     coeff = _coeff;
     reserve0 = _reserve0;
     reserve = _reserve0;
@@ -194,7 +203,8 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   function execute(
     uint[] memory actions,
     uint maxPay,
-    uint minGet
+    uint minGet,
+    address referrer
   ) public nonReentrant returns (uint pay, uint get) {
     poke();
     require(status != MarketStatus.NoAction, 'no actions allowed');
@@ -244,7 +254,19 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     } else if (get > pay) {
       token.safeTransfer(msg.sender, get - pay);
     }
-    insurance = insurance.add(fee.toInt256());
+    address beneficiary = referrerOf[msg.sender];
+    if (beneficiary == address(0)) {
+      require(referrer != msg.sender, 'bad referrer');
+      beneficiary = referrer;
+      referrerOf[msg.sender] = referrer;
+    }
+    if (beneficiary != address(0)) {
+      uint commission = referrerCommission.fmul(fee);
+      commissionOf[beneficiary] = commissionOf[beneficiary].add(commission);
+      insurance = insurance.add(fee.sub(commission).toInt256());
+    } else {
+      insurance = insurance.add(fee.toInt256());
+    }
     // 4. Check spot price and mark price consistency.
     uint spotPx = getSpotPx();
     emit Execute(msg.sender, actions, pay, get, fee, spotPx, mark, oracle.getPrice());
@@ -256,46 +278,46 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   ///      For example, a long position of TOKEN/USD inverse contract can be viewed as short position of USD/TOKEN contract.
   /// @param size The size of the contract. One contract is close to 1 USD in value.
   /// @param minGet The minimum get value in TOKEN the caller is willing to take.
-  function openLong(uint size, uint strike, uint minGet) public returns (uint, uint) {
+  function openLong(uint size, uint strike, uint minGet, address referrer) public returns (uint, uint) {
     // Mint short token of USD/ETH pair
     uint action = MintShort | (getSlot(strike) << 2) | (size << 18);
     uint[] memory actions = new uint[](1);
     actions[0] = action;
-    return execute(actions, 0, minGet);
+    return execute(actions, 0, minGet, referrer);
   }
 
   /// @dev Close a long position of the contract, which is equivalent to closing a short position of the inverse pair.
   /// @param size The size of the contract. One contract is close to 1 USD in value.
   /// @param maxPay The maximum pay value in TOKEN the caller is willing to commit.
-  function closeLong(uint size, uint strike, uint maxPay) public returns (uint, uint) {
+  function closeLong(uint size, uint strike, uint maxPay, address referrer) public returns (uint, uint) {
     // Burn short token of USD/ETH pair
     uint action = BurnShort | (getSlot(strike) << 2) | (size << 18);
     uint[] memory actions = new uint[](1);
     actions[0] = action;
-    return execute(actions, maxPay, 0);
+    return execute(actions, maxPay, 0, referrer);
   }
 
   /// @dev Open a SHORT position of the contract, which is equivalent to opening a long position of the inverse pair.
   ///      For example, a short position of TOKEN/USD inverse contract can be viewed as long position of USD/TOKEN contract.
   /// @param size The size of the contract. One contract is close to 1 USD in value.
   /// @param maxPay The maximum pay value in TOKEN the caller is willing to commit.
-  function openShort(uint size, uint strike, uint maxPay) public returns (uint, uint) {
+  function openShort(uint size, uint strike, uint maxPay, address referrer) public returns (uint, uint) {
     // Mint long token of USD/TOKEN pair
     uint action = MintLong | (getSlot(strike) << 2) | (size << 18);
     uint[] memory actions = new uint[](1);
     actions[0] = action;
-    return execute(actions, maxPay, 0);
+    return execute(actions, maxPay, 0, referrer);
   }
 
   /// @dev Close a long position of the contract, which is equivalent to closing a short position of the inverse pair.
   /// @param size The size of the contract. One contract is close to 1 USD in value.
   /// @param minGet The minimum get value in TOKEN the caller is willing to take.
-  function closeShort(uint size, uint strike, uint minGet) public returns (uint, uint) {
+  function closeShort(uint size, uint strike, uint minGet, address referrer) public returns (uint, uint) {
     // Burn long token of USD/TOKEN pair
     uint action = BurnLong | (getSlot(strike) << 2) | (size << 18);
     uint[] memory actions = new uint[](1);
     actions[0] = action;
-    return execute(actions, 0, minGet);
+    return execute(actions, 0, minGet, referrer);
   }
 
   /// @dev Set the address to become the next governor after accepted.
@@ -598,8 +620,12 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     tradingFee = newTradingFee;
   }
 
+  function setReferrerCommission(uint newReferrerComission) public onlyGovernor {
+    referrerCommission = newReferrerComission;
+  }
+
   function setFundingAdjustThreshold(uint newFundingAdjustThreshold) public onlyGovernor {
-    fundingAdjustThreshold = fundingAdjustThreshold;
+    fundingAdjustThreshold = newFundingAdjustThreshold;
   }
 
   function setSafeThreshold(uint newSafeThreshold) public onlyGovernor {
