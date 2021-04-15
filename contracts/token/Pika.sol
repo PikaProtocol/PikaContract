@@ -1,6 +1,7 @@
 pragma solidity 0.6.12;
 
 import "./IPika.sol";
+import "./IRewardDistributor.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
@@ -31,6 +32,15 @@ contract Pika is IPika, ERC20, AccessControl {
 
     bytes32 public DOMAIN_SEPARATOR;
     mapping(address => uint256) public nonces;
+
+    address[] public rewardDistributors;
+    mapping (address => bool) public noRewardAddresses;
+    uint256 public noRewardSupply;
+
+    modifier onlyGovernor {
+        require(hasRole(DEFAULT_ADMIN_ROLE, msg.sender), "Caller is not gov");
+        _;
+    }
 
     constructor(uint256 chainId) ERC20(NAME, SYMBOL) public {
         DOMAIN_SEPARATOR = keccak256(abi.encode(
@@ -85,5 +95,62 @@ contract Pika is IPika, ERC20, AccessControl {
         );
         require(owner == ecrecover(digest, v, r, s), "INVALID_SIGNATURE");
         _approve(owner, spender, value);
+    }
+
+    function removeRewardForAccount(address account) external onlyGovernor {
+        require(!noRewardAddresses[account], "PIKA: _address is already a no-reward address");
+        noRewardAddresses[account] = true;
+        noRewardSupply = noRewardSupply.add(super.balanceOf(account));
+    }
+
+    function addRewardForAccount(address account) external onlyGovernor {
+        require(noRewardAddresses[account], "PIKA: _address is already a reward address");
+        noRewardAddresses[account] = false;
+        noRewardSupply = noRewardSupply.sub(super.balanceOf(account));
+    }
+
+    function setRewardDistributors(address[] memory newRewardDistributors) external onlyGovernor {
+        rewardDistributors = newRewardDistributors;
+    }
+
+    function recoverClaim(address account, address receiver) external onlyGovernor {
+        for (uint256 i = 0; i < rewardDistributors.length; i++) {
+            IRewardDistributor(rewardDistributors[i]).claimRewards(account, receiver);
+        }
+    }
+
+    function claimRewards(address receiver) external {
+        for (uint256 i = 0; i < rewardDistributors.length; i++) {
+            address rewardDistributor = rewardDistributors[i];
+            IRewardDistributor(rewardDistributor).claimRewards(msg.sender, receiver);
+        }
+    }
+
+    function totalSupplyWithReward() external view returns (uint256) {
+        return totalSupply().sub(noRewardSupply);
+    }
+
+    function balanceWithReward(address account) external view returns (uint256) {
+        if (noRewardAddresses[account]) {
+            return 0;
+        }
+        return super.balanceOf(account);
+    }
+
+    function _beforeTokenTransfer(address from, address to, uint256 amount) internal override {
+        _updateRewards(from);
+        _updateRewards(to);
+        if (noRewardAddresses[from]) {
+            noRewardSupply = noRewardSupply.sub(amount);
+        }
+        if (noRewardAddresses[to]) {
+            noRewardSupply = noRewardSupply.add(amount);
+        }
+    }
+
+    function _updateRewards(address account) private {
+        for (uint256 i = 0; i < rewardDistributors.length; i++) {
+            IRewardDistributor(rewardDistributors[i]).updateRewards(account);
+        }
     }
 }

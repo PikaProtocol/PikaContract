@@ -39,14 +39,6 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   using SafeCastUpgradeable for int;
   using SignedSafeMathUpgradeable for int;
 
-  modifier onlyGovernor {
-    require(
-      msg.sender == governor,
-      "Only governor can call this function."
-    );
-    _;
-  }
-
   enum MarketStatus {
     Normal, // Trading operates as normal.
     NoMint, // No minting actions allowed.
@@ -136,7 +128,15 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
 
   uint public lastPoke; // Last timestamp when the poke action happened.
 //  uint public mark; // Mark price, as measured by exponential decay TWAP of spot prices.
-    uint public override mark; // Mark price, as measured by exponential decay TWAP of spot prices.
+  uint public override mark; // Mark price, as measured by exponential decay TWAP of spot prices.
+
+  modifier onlyGovernor {
+    require(
+      msg.sender == governor,
+      "Only governor can call this function."
+    );
+    _;
+  }
 
   /// @dev Initialize a new PikaPerp smart contract instance.
   /// @param uri EIP-1155 token metadata URI path.
@@ -199,6 +199,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @param actions The list of encoded actions to execute.
   /// @param maxPay The maximum pay value the caller is willing to commit.
   /// @param minGet The minimum get value the caller is willing to take.
+  /// @param referrer The address that refers this trader. Only relevant on the first call.
   function execute(
     uint[] memory actions,
     uint maxPay,
@@ -276,7 +277,9 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @dev Open a long position of the contract, which is equivalent to opening a short position of the inverse pair.
   ///      For example, a long position of TOKEN/USD inverse contract can be viewed as short position of USD/TOKEN contract.
   /// @param size The size of the contract. One contract is close to 1 USD in value.
-  /// @param minGet The minimum get value in TOKEN the caller is willing to take.
+  /// @param strike The price which the leverage token is worth 0.
+  /// @param minGet The minimum get value in ETH the caller is willing to take.
+  /// @param referrer The address that refers this trader. Only relevant on the first call.
   function openLong(uint size, uint strike, uint minGet, address referrer) public payable returns (uint, uint) {
     // Mint short token of USD/ETH pair
     uint action = MintShort | (getSlot(strike) << 2) | (size << 18);
@@ -287,7 +290,9 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
 
   /// @dev Close a long position of the contract, which is equivalent to closing a short position of the inverse pair.
   /// @param size The size of the contract. One contract is close to 1 USD in value.
-  /// @param maxPay The maximum pay value in TOKEN the caller is willing to commit.
+  /// @param strike The price which the leverage token is worth 0.
+  /// @param maxPay The maximum pay value in ETH the caller is willing to commit.
+  /// @param referrer The address that refers this trader. Only relevant on the first call.
   function closeLong(uint size, uint strike, uint maxPay, address referrer) public returns (uint, uint) {
     // Burn short token of USD/ETH pair
     uint action = BurnShort | (getSlot(strike) << 2) | (size << 18);
@@ -297,11 +302,13 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   }
 
   /// @dev Open a SHORT position of the contract, which is equivalent to opening a long position of the inverse pair.
-  ///      For example, a short position of TOKEN/USD inverse contract can be viewed as long position of USD/TOKEN contract.
+  ///      For example, a short position of ETH/USD inverse contract can be viewed as long position of USD/ETH contract.
   /// @param size The size of the contract. One contract is close to 1 USD in value.
-  /// @param maxPay The maximum pay value in TOKEN the caller is willing to commit.
+  /// @param strike The price which the leverage token is worth 0.
+  /// @param maxPay The maximum pay value in ETH the caller is willing to commit.
+  /// @param referrer The address that refers this trader. Only relevant on the first call.
   function openShort(uint size, uint strike, uint maxPay, address referrer) public payable returns (uint, uint) {
-    // Mint long token of USD/TOKEN pair
+    // Mint long token of USD/ETH pair
     uint action = MintLong | (getSlot(strike) << 2) | (size << 18);
     uint[] memory actions = new uint[](1);
     actions[0] = action;
@@ -310,9 +317,11 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
 
   /// @dev Close a long position of the contract, which is equivalent to closing a short position of the inverse pair.
   /// @param size The size of the contract. One contract is close to 1 USD in value.
-  /// @param minGet The minimum get value in TOKEN the caller is willing to take.
+  /// @param strike The price which the leverage token is worth 0.
+  /// @param minGet The minimum get value in ETH the caller is willing to take.
+  /// @param referrer The address that refers this trader. Only relevant on the first call.
   function closeShort(uint size, uint strike, uint minGet, address referrer) public returns (uint, uint) {
-    // Burn long token of USD/TOKEN pair
+    // Burn long token of USD/ETH pair
     uint action = BurnLong | (getSlot(strike) << 2) | (size << 18);
     uint[] memory actions = new uint[](1);
     actions[0] = action;
