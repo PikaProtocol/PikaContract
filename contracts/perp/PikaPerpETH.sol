@@ -78,6 +78,11 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     uint amount // The amount of tokens collected.
   );
 
+  event RewardDistribute(
+    uint rewardDistributeTime, // The timestamp that reward is distributed.
+    uint amount // The amount of tokens collected.
+  );
+
   uint public constant MintLong = 0;
   uint public constant BurnLong = 1;
   uint public constant MintShort = 2;
@@ -87,6 +92,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   // to avoid stack too deep error in initialize method.
   uint public constant TRADING_FEE = 0.0025e18; // 0.25% of notional value.
   uint public constant REFERRER_COMMISSION = 0.10e18; // 10% of trading fee.
+  uint public constant PIKA_REWARD_RATIO = 0.20e18; // 20% of trading fee.
   uint public constant FUNDING_ADJUST_THRESHOLD = 1.025e18; // 2.5% threshold.
   uint public constant SAFE_THRESHOLD = 0.93e18; // 93% kill factor.
   uint public constant SPOT_MARK_THRESHOLD = 1.05e18; // 5% consistency requirement.
@@ -107,6 +113,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
 
   uint public tradingFee;
   uint public referrerCommission;
+  uint public pikaRewardRatio;
   uint public fundingAdjustThreshold;
   uint public safeThreshold;
   uint public spotMarkThreshold;
@@ -123,8 +130,10 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   address public pendingGovernor;
   address public guardian;
   address public pendingGuardian;
+  address public rewardDistributor;
 
   int public shift; // the shift is added to the AMM price as to make up the funding payment.
+  uint public pikaReward; // the trading fee reward for pika holders
   int public override insurance;
 //  int public insurance;
   int public override burden;
@@ -133,6 +142,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   uint public maxSafeLongSlot; // The current highest slot that is safe for long positions.
   uint public minSafeShortSlot; // The current lowest slot that is safe for short positions.
 
+  uint public lastRewardDistributeTime; // Last timestamp when the reward is distributed.
   uint public lastPoke; // Last timestamp when the poke action happened.
 //  uint public mark; // Mark price, as measured by exponential decay TWAP of spot prices.
   uint public override mark; // Mark price, as measured by exponential decay TWAP of spot prices.
@@ -158,7 +168,8 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     IOracle _oracle,
     uint _coeff,
     uint _reserve0,
-    uint _liquidationPerSec
+    uint _liquidationPerSec,
+    address _rewardDistributor
   ) public initializer {
     __ERC1155_init(uri);
     pika = _pika;
@@ -167,6 +178,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     // ===== Parameters Start ======
     tradingFee = TRADING_FEE;
     referrerCommission = REFERRER_COMMISSION;
+    pikaRewardRatio = PIKA_REWARD_RATIO;
     fundingAdjustThreshold = FUNDING_ADJUST_THRESHOLD;
     safeThreshold = SAFE_THRESHOLD;
     spotMarkThreshold = SPOT_MARK_THRESHOLD;
@@ -181,6 +193,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     lastPoke = now;
     guardian = msg.sender;
     governor = msg.sender;
+    rewardDistributor = _rewardDistributor;
     uint spotPx = getSpotPx();
     mark = spotPx;
     uint slot = getSlot(spotPx);
@@ -261,6 +274,15 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     } else if (get > pay) {
       ethTransfer(msg.sender, get - pay);
     }
+    // 3. Settle tokens with the executor and collect the trading fee. Distribute trading fee reward every hour to pika holders.
+    uint reward = pikaRewardRatio.fmul(fee);
+    pikaReward = pikaReward.add(reward);
+    if (now - lastRewardDistributeTime > 1 hours && pikaReward > 0) {
+      token.safeTransfer(msg.sender, pikaReward);
+      lastRewardDistributeTime = now;
+      emit RewardDistribute(lastRewardDistributeTime, pikaReward);
+      pikaReward = 0;
+    }
     address beneficiary = referrerOf[msg.sender];
     if (beneficiary == address(0)) {
       require(referrer != msg.sender, 'bad referrer');
@@ -270,9 +292,9 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     if (beneficiary != address(0)) {
       uint commission = referrerCommission.fmul(fee);
       commissionOf[beneficiary] = commissionOf[beneficiary].add(commission);
-      insurance = insurance.add(fee.sub(commission).toInt256());
+      insurance = insurance.add(fee.sub(commission).sub(reward).toInt256());
     } else {
-      insurance = insurance.add(fee.toInt256());
+      insurance = insurance.add(fee.sub(reward).toInt256());
     }
     // 4. Check spot price and mark price consistency.
     uint spotPx = getSpotPx();
@@ -654,35 +676,43 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
 
   /// @dev Update max liquidation per second parameter.
   /// @param nextLiquidationPerSec The new max liquidation parameter.
-  function setLiquidationPerSec(uint nextLiquidationPerSec) public onlyGovernor {
+  function setLiquidationPerSec(uint nextLiquidationPerSec) external onlyGovernor {
     liquidationPerSec = nextLiquidationPerSec;
   }
 
-  function setTradingFee(uint newTradingFee) public onlyGovernor {
+  function setTradingFee(uint newTradingFee) external onlyGovernor {
     tradingFee = newTradingFee;
   }
 
-  function setFundingAdjustThreshold(uint newFundingAdjustThreshold) public onlyGovernor {
+  function setReferrerCommission(uint newReferrerCommission) external onlyGovernor {
+    referrerCommission = newReferrerCommission;
+  }
+
+  function setPikaRewardRatio(uint newPikaRewardRatio) external onlyGovernor {
+    pikaRewardRatio = newPikaRewardRatio;
+  }
+
+  function setFundingAdjustThreshold(uint newFundingAdjustThreshold) external onlyGovernor {
     fundingAdjustThreshold = newFundingAdjustThreshold;
   }
 
-  function setSafeThreshold(uint newSafeThreshold) public onlyGovernor {
+  function setSafeThreshold(uint newSafeThreshold) external onlyGovernor {
     safeThreshold = newSafeThreshold;
   }
 
-  function setSpotMarkThreshold(uint newSpotMarkThreshold) public onlyGovernor {
+  function setSpotMarkThreshold(uint newSpotMarkThreshold) external onlyGovernor {
     spotMarkThreshold = newSpotMarkThreshold;
   }
 
-  function setDecayPerSecond(uint newDecayPerSecond) public onlyGovernor {
+  function setDecayPerSecond(uint newDecayPerSecond) external onlyGovernor {
     decayPerSecond = newDecayPerSecond;
   }
 
-  function setMaxShiftChangePerSecond(uint newMaxShiftChangePerSecond) public onlyGovernor {
+  function setMaxShiftChangePerSecond(uint newMaxShiftChangePerSecond) external onlyGovernor {
     maxShiftChangePerSecond = newMaxShiftChangePerSecond;
   }
 
-  function setMaxPokeElapsed(uint newMaxPokeElapsed) public onlyGovernor {
+  function setMaxPokeElapsed(uint newMaxPokeElapsed) external onlyGovernor {
     maxPokeElapsed = newMaxPokeElapsed;
   }
 

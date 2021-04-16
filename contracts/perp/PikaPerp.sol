@@ -86,6 +86,11 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     uint amount // The amount of tokens collected.
   );
 
+  event RewardDistribute(
+    uint rewardDistributeTime, // The timestamp that reward is distributed.
+    uint amount // The amount of tokens collected.
+  );
+
   uint public constant MintLong = 0;
   uint public constant BurnLong = 1;
   uint public constant MintShort = 2;
@@ -116,6 +121,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
 
   uint public tradingFee;
   uint public referrerCommission;
+  uint public pikaRewardRatio;
   uint public fundingAdjustThreshold;
   uint public safeThreshold;
   uint public spotMarkThreshold;
@@ -134,14 +140,16 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   address public pendingGuardian;
 
   int public shift; // the shift is added to the AMM price as to make up the funding payment.
-    int public override insurance;
+  uint public pikaReward; // the trading fee reward for pika holders
+  int public override insurance;
 //  int public insurance;
-    int public override burden;
+  int public override burden;
 //  int public burden;
 
   uint public maxSafeLongSlot; // The current highest slot that is safe for long positions.
   uint public minSafeShortSlot; // The current lowest slot that is safe for short positions.
 
+  uint public lastRewardDistributeTime; // Last timestamp when the reward is distributed.
   uint public lastPoke; // Last timestamp when the poke action happened.
 //  uint public mark; // Mark price, as measured by exponential decay TWAP of spot prices.
     uint public override mark; // Mark price, as measured by exponential decay TWAP of spot prices.
@@ -256,11 +264,19 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     }
     require(pay <= maxPay, 'max pay constraint violation');
     require(get >= minGet, 'min get constraint violation');
-    // 3. Settle tokens with the executor and collect the trading fee.
+    // 3. Settle tokens with the executor and collect the trading fee. Distribute trading fee reward every hour to pika holders.
     if (pay > get) {
       token.safeTransferFrom(msg.sender, address(this), pay - get);
     } else if (get > pay) {
       token.safeTransfer(msg.sender, get - pay);
+    }
+    uint reward = pikaRewardRatio.fmul(fee);
+    pikaReward = pikaReward.add(reward);
+    if (now - lastRewardDistributeTime > 1 hours && pikaReward > 0) {
+      token.safeTransfer(msg.sender, pikaReward);
+      lastRewardDistributeTime = now;
+      emit RewardDistribute(lastRewardDistributeTime, pikaReward);
+      pikaReward = 0;
     }
     address beneficiary = referrerOf[msg.sender];
     if (beneficiary == address(0)) {
@@ -271,9 +287,9 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     if (beneficiary != address(0)) {
       uint commission = referrerCommission.fmul(fee);
       commissionOf[beneficiary] = commissionOf[beneficiary].add(commission);
-      insurance = insurance.add(fee.sub(commission).toInt256());
+      insurance = insurance.add(fee.sub(commission).sub(reward).toInt256());
     } else {
-      insurance = insurance.add(fee.toInt256());
+      insurance = insurance.add(fee.sub(reward).toInt256());
     }
     // 4. Check spot price and mark price consistency.
     uint spotPx = getSpotPx();
@@ -646,6 +662,10 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
 
   function setReferrerCommission(uint newReferrerComission) public onlyGovernor {
     referrerCommission = newReferrerComission;
+  }
+
+  function setPikaRewardRatio(uint newPikaRewardRatio) external onlyGovernor {
+    pikaRewardRatio = newPikaRewardRatio;
   }
 
   function setFundingAdjustThreshold(uint newFundingAdjustThreshold) public onlyGovernor {
