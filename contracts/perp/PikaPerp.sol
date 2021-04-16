@@ -14,8 +14,9 @@ import '@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol
 import '@openzeppelin/contracts-upgradeable/utils/SafeCastUpgradeable.sol';
 
 import './IPikaPerp.sol';
-import '../lib/PerpMath.sol';
 import '../token/IPika.sol';
+import '../lib/PerpMath.sol';
+import "../lib/UniERC20.sol";
 import '../oracle/IOracle.sol';
 
 /*
@@ -658,3 +659,4 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   }
 
 }
+

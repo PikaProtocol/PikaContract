@@ -1,13 +1,19 @@
 {
   "name": "hardhat-project",
+  "scripts": {
+    "build": "hardhat compile",
+    "console": "hardhat console",
+    "test": "hardhat test --verbose"
+  },
   "devDependencies": {
     "@nomiclabs/hardhat-ethers": "^2.0.2",
     "@nomiclabs/hardhat-waffle": "^2.0.1",
     "@openzeppelin/hardhat-upgrades": "^1.6.0",
     "chai": "^4.3.4",
     "ethereum-waffle": "^3.3.0",
-    "ethers": "^5.0.32",
-    "hardhat": "^2.1.2"
+    "ethers": "^5.0.0",
+    "hardhat": "^2.1.2",
+    "mocha": "^7.0.0"
   },
   "dependencies": {
     "@chainlink/contracts": "^0.1.6",
