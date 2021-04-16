@@ -1,3 +1,5 @@
+//SPDX-License-Identifier: MIT
+
 pragma solidity 0.6.12;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
@@ -69,6 +71,11 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   event Withdraw(
     address indexed guardian, // The guardian who withdraws insurance funds.
     uint amount // The amount of funds withdrawn.
+  );
+
+  event Collect(
+    address indexed referrer, // The user who collects the commission fee.
+    uint amount // The amount of tokens collected.
   );
 
   uint public constant MintLong = 0;
@@ -326,6 +333,14 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     uint[] memory actions = new uint[](1);
     actions[0] = action;
     return execute(actions, 0, minGet, referrer);
+  }
+
+  /// @dev Collect trading commission for the caller.
+  /// @param amount The amount of commission to collect.
+  function collect(uint amount) public nonReentrant {
+    commissionOf[msg.sender] = commissionOf[msg.sender].sub(amount);
+    token.safeTransfer(msg.sender, amount);
+    emit Collect(msg.sender, amount);
   }
 
   /// @dev Set the address to become the next governor after accepted.
