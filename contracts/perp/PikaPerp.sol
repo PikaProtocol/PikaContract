@@ -1,3 +1,5 @@
+//SPDX-License-Identifier: MIT
+
 pragma solidity 0.6.12;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
@@ -36,17 +38,10 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
 
   using SafeMathUpgradeable for uint;
   using SafeERC20 for IERC20;
+  using UniERC20 for IERC20;
   using SafeCastUpgradeable for uint;
   using SafeCastUpgradeable for int;
   using SignedSafeMathUpgradeable for int;
-
-  modifier onlyGovernor {
-    require(
-      msg.sender == governor,
-      "Only governor can call this function."
-    );
-    _;
-  }
 
   enum MarketStatus {
     Normal, // Trading operates as normal.
@@ -80,6 +75,16 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     uint amount // The amount of funds withdrawn.
   );
 
+  event Collect(
+    address indexed referrer, // The user who collects the commission fee.
+    uint amount // The amount of tokens collected.
+  );
+
+  event RewardDistribute(
+    uint rewardDistributeTime, // The timestamp that reward is distributed.
+    uint amount // The amount of tokens collected.
+  );
+
   uint public constant MintLong = 0;
   uint public constant BurnLong = 1;
   uint public constant MintShort = 2;
@@ -89,13 +94,13 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   // to avoid stack too deep error in initialize method.
   uint public constant TRADING_FEE = 0.0025e18; // 0.25% of notional value.
   uint public constant REFERRER_COMMISSION = 0.10e18; // 10% of trading fee.
+  uint public constant PIKA_REWARD_RATIO = 0.20e18; // 20% of trading fee.
   uint public constant FUNDING_ADJUST_THRESHOLD = 1.025e18; // 2.5% threshold.
   uint public constant SAFE_THRESHOLD = 0.93e18; // 93% kill factor.
   uint public constant SPOT_MARK_THRESHOLD = 1.05e18; // 5% consistency requirement.
   uint public constant DECAY_PER_SECOND = 0.998e18; // 99.8% exponential TWAP decay.
   uint public constant MAX_ALPHA_CHANGE_PER_SEC = uint(0.01e18) / uint(1 days); // 1% per day cap.
   uint public constant MAX_POKE_ELAPSED = 1 hours; // 1 hour cap.
-
 
   mapping(uint => uint) public supplyOf;
   mapping(uint => uint) public longOffsetOf;
@@ -110,6 +115,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
 
   uint public tradingFee;
   uint public referrerCommission;
+  uint public pikaRewardRatio;
   uint public fundingAdjustThreshold;
   uint public safeThreshold;
   uint public spotMarkThreshold;
@@ -126,19 +132,30 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   address public pendingGovernor;
   address public guardian;
   address public pendingGuardian;
+  address public rewardDistributor;
 
   int public shift; // the shift is added to the AMM price as to make up the funding payment.
-    int public override insurance;
+  uint public pikaReward; // the trading fee reward for pika holders
+  int public override insurance;
 //  int public insurance;
-    int public override burden;
+  int public override burden;
 //  int public burden;
 
   uint public maxSafeLongSlot; // The current highest slot that is safe for long positions.
   uint public minSafeShortSlot; // The current lowest slot that is safe for short positions.
 
+  uint public lastRewardDistributeTime; // Last timestamp when the reward is distributed.
   uint public lastPoke; // Last timestamp when the poke action happened.
 //  uint public mark; // Mark price, as measured by exponential decay TWAP of spot prices.
-    uint public override mark; // Mark price, as measured by exponential decay TWAP of spot prices.
+  uint public override mark; // Mark price, as measured by exponential decay TWAP of spot prices.
+
+  modifier onlyGovernor {
+    require(
+      msg.sender == governor,
+      "Only governor can call this function."
+    );
+    _;
+  }
 
   /// @dev Initialize a new PikaPerp smart contract instance.
   /// @param uri EIP-1155 token metadata URI path.
@@ -153,7 +170,8 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     IOracle _oracle,
     uint _coeff,
     uint _reserve0,
-    uint _liquidationPerSec
+    uint _liquidationPerSec,
+    address _rewardDistributor
   ) public initializer {
     __ERC1155_init(uri);
     pika = _pika;
@@ -162,6 +180,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     // ===== Parameters Start ======
     tradingFee = TRADING_FEE;
     referrerCommission = REFERRER_COMMISSION;
+    pikaRewardRatio = PIKA_REWARD_RATIO;
     fundingAdjustThreshold = FUNDING_ADJUST_THRESHOLD;
     safeThreshold = SAFE_THRESHOLD;
     spotMarkThreshold = SPOT_MARK_THRESHOLD;
@@ -176,6 +195,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     lastPoke = now;
     guardian = msg.sender;
     governor = msg.sender;
+    rewardDistributor = _rewardDistributor;
     uint spotPx = getSpotPx();
     mark = spotPx;
     uint slot = getSlot(spotPx);
@@ -207,7 +227,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     uint maxPay,
     uint minGet,
     address referrer
-  ) public nonReentrant returns (uint pay, uint get) {
+  ) public payable nonReentrant returns (uint pay, uint get) {
     poke();
     require(status != MarketStatus.NoAction, 'no actions allowed');
     // 1. Aggregate the effects of all the actions with token minting / burning.
@@ -252,9 +272,18 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     require(get >= minGet, 'min get constraint violation');
     // 3. Settle tokens with the executor and collect the trading fee.
     if (pay > get) {
-      token.safeTransferFrom(msg.sender, address(this), pay - get);
+      token.uniTransferFromSenderToThis(pay - get);
     } else if (get > pay) {
-      token.safeTransfer(msg.sender, get - pay);
+      token.uniTransfer(msg.sender, get - pay);
+    }
+    // 3. Settle tokens with the executor and collect the trading fee. Distribute trading fee reward every hour to pika holders.
+    uint reward = pikaRewardRatio.fmul(fee);
+    pikaReward = pikaReward.add(reward);
+    if (now - lastRewardDistributeTime > 1 hours && pikaReward > 0) {
+      token.uniTransfer(msg.sender, pikaReward);
+      lastRewardDistributeTime = now;
+      emit RewardDistribute(lastRewardDistributeTime, pikaReward);
+      pikaReward = 0;
     }
     address beneficiary = referrerOf[msg.sender];
     if (beneficiary == address(0)) {
@@ -265,9 +294,9 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     if (beneficiary != address(0)) {
       uint commission = referrerCommission.fmul(fee);
       commissionOf[beneficiary] = commissionOf[beneficiary].add(commission);
-      insurance = insurance.add(fee.sub(commission).toInt256());
+      insurance = insurance.add(fee.sub(commission).sub(reward).toInt256());
     } else {
-      insurance = insurance.add(fee.toInt256());
+      insurance = insurance.add(fee.sub(reward).toInt256());
     }
     // 4. Check spot price and mark price consistency.
     uint spotPx = getSpotPx();
@@ -280,9 +309,9 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   ///      For example, a long position of TOKEN/USD inverse contract can be viewed as short position of USD/TOKEN contract.
   /// @param size The size of the contract. One contract is close to 1 USD in value.
   /// @param strike The price which the leverage token is worth 0.
-  /// @param minGet The minimum get value in TOKEN the caller is willing to take.
+  /// @param minGet The minimum get value in ETH the caller is willing to take.
   /// @param referrer The address that refers this trader. Only relevant on the first call.
-  function openLong(uint size, uint strike, uint minGet, address referrer) public returns (uint, uint) {
+  function openLong(uint size, uint strike, uint minGet, address referrer) public payable returns (uint, uint) {
     // Mint short token of USD/ETH pair
     uint action = MintShort | (getSlot(strike) << 2) | (size << 18);
     uint[] memory actions = new uint[](1);
@@ -293,7 +322,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @dev Close a long position of the contract, which is equivalent to closing a short position of the inverse pair.
   /// @param size The size of the contract. One contract is close to 1 USD in value.
   /// @param strike The price which the leverage token is worth 0.
-  /// @param maxPay The maximum pay value in TOKEN the caller is willing to commit.
+  /// @param maxPay The maximum pay value in ETH the caller is willing to commit.
   /// @param referrer The address that refers this trader. Only relevant on the first call.
   function closeLong(uint size, uint strike, uint maxPay, address referrer) public returns (uint, uint) {
     // Burn short token of USD/ETH pair
@@ -304,13 +333,13 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   }
 
   /// @dev Open a SHORT position of the contract, which is equivalent to opening a long position of the inverse pair.
-  ///      For example, a short position of TOKEN/USD inverse contract can be viewed as long position of USD/TOKEN contract.
+  ///      For example, a short position of ETH/USD inverse contract can be viewed as long position of USD/ETH contract.
   /// @param size The size of the contract. One contract is close to 1 USD in value.
   /// @param strike The price which the leverage token is worth 0.
-  /// @param maxPay The maximum pay value in TOKEN the caller is willing to commit.
+  /// @param maxPay The maximum pay value in ETH the caller is willing to commit.
   /// @param referrer The address that refers this trader. Only relevant on the first call.
-  function openShort(uint size, uint strike, uint maxPay, address referrer) public returns (uint, uint) {
-    // Mint long token of USD/TOKEN pair
+  function openShort(uint size, uint strike, uint maxPay, address referrer) public payable returns (uint, uint) {
+    // Mint long token of USD/ETH pair
     uint action = MintLong | (getSlot(strike) << 2) | (size << 18);
     uint[] memory actions = new uint[](1);
     actions[0] = action;
@@ -320,14 +349,22 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @dev Close a long position of the contract, which is equivalent to closing a short position of the inverse pair.
   /// @param size The size of the contract. One contract is close to 1 USD in value.
   /// @param strike The price which the leverage token is worth 0.
-  /// @param minGet The minimum get value in TOKEN the caller is willing to take.
+  /// @param minGet The minimum get value in ETH the caller is willing to take.
   /// @param referrer The address that refers this trader. Only relevant on the first call.
   function closeShort(uint size, uint strike, uint minGet, address referrer) public returns (uint, uint) {
-    // Burn long token of USD/TOKEN pair
+    // Burn long token of USD/ETH pair
     uint action = BurnLong | (getSlot(strike) << 2) | (size << 18);
     uint[] memory actions = new uint[](1);
     actions[0] = action;
     return execute(actions, 0, minGet, referrer);
+  }
+
+  /// @dev Collect trading commission for the caller.
+  /// @param amount The amount of commission to collect.
+  function collect(uint amount) public nonReentrant {
+    commissionOf[msg.sender] = commissionOf[msg.sender].sub(amount);
+    token.uniTransfer(msg.sender, amount);
+    emit Collect(msg.sender, amount);
   }
 
   /// @dev Set the address to become the next governor after accepted.
@@ -361,7 +398,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @dev Deposit more funds to the insurance pool.
   /// @param amount The amount of funds to deposit.
   function deposit(uint amount) public nonReentrant {
-    token.safeTransferFrom(msg.sender, address(this), amount);
+    token.uniTransferFromSenderToThis(amount);
     insurance = insurance.add(amount.toInt256());
     emit Deposit(msg.sender, amount);
   }
@@ -372,7 +409,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     require(msg.sender == guardian, 'not the guardian');
     insurance = insurance.sub(amount.toInt256());
     require(insurance > 0, 'negative insurance after withdrawal');
-    token.safeTransfer(msg.sender, amount);
+    token.uniTransfer(msg.sender, amount);
     emit Withdraw(msg.sender, amount);
   }
 
@@ -468,7 +505,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     return value;
   }
 
-  /// @dev Burn position tokens and returns the value of the debt involved.
+  /// @dev Burn position tokens and returns the value of the debt involved. If the strike is 0, burn PIKA stablecoin.
   /// @param ident The identifier of position tokens to burn.
   /// @param size The amount of position tokens to burn.
   function _doBurn(uint ident, uint size) internal returns (uint) {
@@ -622,39 +659,43 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
 
   /// @dev Update max liquidation per second parameter.
   /// @param nextLiquidationPerSec The new max liquidation parameter.
-  function setLiquidationPerSec(uint nextLiquidationPerSec) public onlyGovernor {
+  function setLiquidationPerSec(uint nextLiquidationPerSec) external onlyGovernor {
     liquidationPerSec = nextLiquidationPerSec;
   }
 
-  function setTradingFee(uint newTradingFee) public onlyGovernor {
+  function setTradingFee(uint newTradingFee) external onlyGovernor {
     tradingFee = newTradingFee;
   }
 
-  function setReferrerCommission(uint newReferrerComission) public onlyGovernor {
-    referrerCommission = newReferrerComission;
+  function setReferrerCommission(uint newReferrerCommission) external onlyGovernor {
+    referrerCommission = newReferrerCommission;
   }
 
-  function setFundingAdjustThreshold(uint newFundingAdjustThreshold) public onlyGovernor {
+  function setPikaRewardRatio(uint newPikaRewardRatio) external onlyGovernor {
+    pikaRewardRatio = newPikaRewardRatio;
+  }
+
+  function setFundingAdjustThreshold(uint newFundingAdjustThreshold) external onlyGovernor {
     fundingAdjustThreshold = newFundingAdjustThreshold;
   }
 
-  function setSafeThreshold(uint newSafeThreshold) public onlyGovernor {
+  function setSafeThreshold(uint newSafeThreshold) external onlyGovernor {
     safeThreshold = newSafeThreshold;
   }
 
-  function setSpotMarkThreshold(uint newSpotMarkThreshold) public onlyGovernor {
+  function setSpotMarkThreshold(uint newSpotMarkThreshold) external onlyGovernor {
     spotMarkThreshold = newSpotMarkThreshold;
   }
 
-  function setDecayPerSecond(uint newDecayPerSecond) public onlyGovernor {
+  function setDecayPerSecond(uint newDecayPerSecond) external onlyGovernor {
     decayPerSecond = newDecayPerSecond;
   }
 
-  function setMaxShiftChangePerSecond(uint newMaxShiftChangePerSecond) public onlyGovernor {
+  function setMaxShiftChangePerSecond(uint newMaxShiftChangePerSecond) external onlyGovernor {
     maxShiftChangePerSecond = newMaxShiftChangePerSecond;
   }
 
-  function setMaxPokeElapsed(uint newMaxPokeElapsed) public onlyGovernor {
+  function setMaxPokeElapsed(uint newMaxPokeElapsed) external onlyGovernor {
     maxPokeElapsed = newMaxPokeElapsed;
   }
 

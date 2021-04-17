@@ -36,11 +36,11 @@ contract Pika is IPika, ERC20, AccessControl {
     mapping(address => uint256) public nonces;
 
     address[] public rewardDistributors;
-    mapping (address => bool) public noRewardAddresses;
+    mapping (address => bool) public noRewardAccounts;
     uint256 public noRewardSupply;
 
     modifier onlyGovernor {
-        require(hasRole(DEFAULT_ADMIN_ROLE, msg.sender), "Caller is not gov");
+        require(hasRole(DEFAULT_ADMIN_ROLE, msg.sender), "Caller is not the governor");
         _;
     }
 
@@ -99,16 +99,16 @@ contract Pika is IPika, ERC20, AccessControl {
         _approve(owner, spender, value);
     }
 
-    function removeRewardForAccount(address account) external onlyGovernor {
-        require(!noRewardAddresses[account], "PIKA: _address is already a no-reward address");
-        noRewardAddresses[account] = true;
-        noRewardSupply = noRewardSupply.add(super.balanceOf(account));
+    function addToNoRewardAccounts(address account) external onlyGovernor {
+        require(!noRewardAccounts[account], "PIKA: _address is already a no-reward address");
+        noRewardAccounts[account] = true;
+        noRewardSupply = noRewardSupply.add(balanceOf(account));
     }
 
-    function addRewardForAccount(address account) external onlyGovernor {
-        require(noRewardAddresses[account], "PIKA: _address is already a reward address");
-        noRewardAddresses[account] = false;
-        noRewardSupply = noRewardSupply.sub(super.balanceOf(account));
+    function removeFromNoRewardAccounts(address account) external onlyGovernor {
+        require(noRewardAccounts[account], "PIKA: _address is already a reward address");
+        noRewardAccounts[account] = false;
+        noRewardSupply = noRewardSupply.sub(balanceOf(account));
     }
 
     function setRewardDistributors(address[] memory newRewardDistributors) external onlyGovernor {
@@ -128,24 +128,28 @@ contract Pika is IPika, ERC20, AccessControl {
         }
     }
 
-    function totalSupplyWithReward() external view returns (uint256) {
+    function totalSupplyWithReward() external override view returns (uint256) {
         return totalSupply().sub(noRewardSupply);
     }
 
-    function balanceWithReward(address account) external view returns (uint256) {
-        if (noRewardAddresses[account]) {
+    function balanceWithReward(address account) external override view returns (uint256) {
+        if (noRewardAccounts[account]) {
             return 0;
         }
-        return super.balanceOf(account);
+        return balanceOf(account);
     }
 
     function _beforeTokenTransfer(address from, address to, uint256 amount) internal override {
-        _updateRewards(from);
-        _updateRewards(to);
-        if (noRewardAddresses[from]) {
+        if (from != address(0)) {
+            _updateRewards(from);
+        }
+        if (to != address(0)) {
+            _updateRewards(to);
+        }
+        if (noRewardAccounts[from]) {
             noRewardSupply = noRewardSupply.sub(amount);
         }
-        if (noRewardAddresses[to]) {
+        if (noRewardAccounts[to]) {
             noRewardSupply = noRewardSupply.add(amount);
         }
     }
