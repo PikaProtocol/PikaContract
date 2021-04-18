@@ -57,7 +57,9 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     uint fee, // The fee collected to the protocol.
     uint spotPx, // The price of the virtual AMM.
     uint mark, // The mark price.
-    uint indexPx // The oracle price.
+    uint indexPx, // The oracle price.
+    int insurance, // The current insurance amount.
+    uint tokenBalance // The current token balance of the protocol.
   );
 
   event Liquidate(
@@ -136,7 +138,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
 
   int public shift; // the shift is added to the AMM price as to make up the funding payment.
   uint public pikaReward; // the trading fee reward for pika holders
-  int public override insurance;
+  int public override insurance; // the amount of token to back the exchange
 //  int public insurance;
   int public override burden;
 //  int public burden;
@@ -300,7 +302,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     }
     // 4. Check spot price and mark price consistency.
     uint spotPx = getSpotPx();
-    emit Execute(msg.sender, actions, pay, get, fee, spotPx, mark, oracle.getPrice());
+    emit Execute(msg.sender, actions, pay, get, fee, spotPx, mark, oracle.getPrice(), insurance, token.uniBalanceOf(address(this)));
     require(spotPx.fmul(spotMarkThreshold) > mark, 'slippage is too high');
     require(spotPx.fdiv(spotMarkThreshold) < mark, 'slippage is too high');
   }
@@ -450,7 +452,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
       uint size = supplyOf[ident];
       emit Liquidate(ident, size);
       burden = burden.add(size.toInt256());
-      insurance = insurance.sub(strike.fmul(size).toInt256());
+      insurance = insurance.sub(size.fdiv(strike).toInt256());
       longOffsetOf[_prevMaxSafeLongSlot]++;
       _prevMaxSafeLongSlot--;
     }
@@ -464,7 +466,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
       uint size = supplyOf[ident];
       emit Liquidate(ident, size);
       burden = burden.sub(size.toInt256());
-      insurance = insurance.add(strike.fmul(size).toInt256());
+      insurance = insurance.add(size.fdiv(strike).toInt256());
       shortOffsetOf[_prevMinSafeShortSlot]++;
       _prevMinSafeShortSlot++;
     }
