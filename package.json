@@ -11,13 +11,13 @@
     "@openzeppelin/hardhat-upgrades": "^1.6.0",
     "chai": "^4.3.4",
     "ethereum-waffle": "^3.3.0",
-    "ethers": "^5.0.0",
+    "ethers": "^5.1.2",
     "hardhat": "^2.1.2",
     "mocha": "^7.0.0"
   },
   "dependencies": {
     "@chainlink/contracts": "^0.1.6",
     "@openzeppelin/contracts": "^3.3.0",
-    "@openzeppelin/contracts-upgradeable": "^3.2.0"
+    "@openzeppelin/contracts-upgradeable": "^3.3.0"
   }
 }

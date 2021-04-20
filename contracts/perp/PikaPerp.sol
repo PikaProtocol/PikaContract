@@ -2,6 +2,8 @@
 
 pragma solidity 0.6.12;
 
+import "hardhat/console.sol";
+
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
@@ -134,7 +136,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   address public pendingGovernor;
   address public guardian;
   address public pendingGuardian;
-  address public rewardDistributor;
+  address payable public rewardDistributor;
 
   int public shift; // the shift is added to the AMM price as to make up the funding payment.
   uint public pikaReward; // the trading fee reward for pika holders
@@ -165,6 +167,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @param _oracle The oracle contract to get the ideal price.
   /// @param _coeff The initial coefficient factor for price slippage.
   /// @param _reserve0 The initial virtual reserve for base tokens.
+  /// @param _liquidationPerSec // The maximum liquidation amount per second.
   function initialize(
     string memory uri,
     address _pika,
@@ -173,7 +176,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     uint _coeff,
     uint _reserve0,
     uint _liquidationPerSec,
-    address _rewardDistributor
+    address payable _rewardDistributor
   ) public initializer {
     __ERC1155_init(uri);
     pika = _pika;
@@ -195,6 +198,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     liquidationPerSec = _liquidationPerSec;
     // ===== Parameters end ======
     lastPoke = now;
+    lastRewardDistributeTime = now;
     guardian = msg.sender;
     governor = msg.sender;
     rewardDistributor = _rewardDistributor;
@@ -209,6 +213,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @dev Poke contract state update. Must be called prior to any execution.
   function poke() public {
     uint timeElapsed = now - lastPoke;
+    console.log("timeElapsed", timeElapsed);
     if (timeElapsed > 0) {
       timeElapsed = MathUpgradeable.min(timeElapsed, maxPokeElapsed);
       _updateMark(timeElapsed);
@@ -259,10 +264,13 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
         assert(false); // not reachable
       }
     }
+//    console.log("buy", buy);
+//    console.log("sell", sell);
     // 2. Perform one buy or one sell based on the aggregated actions.
     uint fee = 0;
     if (buy > sell) {
       uint value = _doBuy(buy - sell);
+//      console.log("value", value);
       fee = tradingFee.fmul(value);
       pay = pay.add(value).add(fee);
     } else if (sell > buy) {
@@ -270,19 +278,24 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
       fee = tradingFee.fmul(value);
       get = get.add(value).sub(fee);
     }
+//    console.log("max pay", maxPay, pay);
+//    console.log("min get", minGet, get);
     require(pay <= maxPay, 'max pay constraint violation');
     require(get >= minGet, 'min get constraint violation');
     // 3. Settle tokens with the executor and collect the trading fee.
     if (pay > get) {
       token.uniTransferFromSenderToThis(pay - get);
+      console.log("spend eth", pay - get);
     } else if (get > pay) {
       token.uniTransfer(msg.sender, get - pay);
+      console.log("get back eth", get - pay);
     }
     // 3. Settle tokens with the executor and collect the trading fee. Distribute trading fee reward every hour to pika holders.
     uint reward = pikaRewardRatio.fmul(fee);
     pikaReward = pikaReward.add(reward);
     if (now - lastRewardDistributeTime > 1 hours && pikaReward > 0) {
-      token.uniTransfer(msg.sender, pikaReward);
+      console.log("sending reward");
+      token.uniTransfer(rewardDistributor, pikaReward);
       lastRewardDistributeTime = now;
       emit RewardDistribute(lastRewardDistributeTime, pikaReward);
       pikaReward = 0;
@@ -303,6 +316,8 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     // 4. Check spot price and mark price consistency.
     uint spotPx = getSpotPx();
     emit Execute(msg.sender, actions, pay, get, fee, spotPx, mark, oracle.getPrice(), insurance, token.uniBalanceOf(address(this)));
+    console.log("spot", spotPx);
+    console.log("mark", mark);
     require(spotPx.fmul(spotMarkThreshold) > mark, 'slippage is too high');
     require(spotPx.fdiv(spotMarkThreshold) < mark, 'slippage is too high');
   }
@@ -311,23 +326,23 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   ///      For example, a long position of TOKEN/USD inverse contract can be viewed as short position of USD/TOKEN contract.
   /// @param size The size of the contract. One contract is close to 1 USD in value.
   /// @param strike The price which the leverage token is worth 0.
-  /// @param minGet The minimum get value in ETH the caller is willing to take.
+  /// @param minGet The minimum get value in TOKEN the caller is willing to take.
   /// @param referrer The address that refers this trader. Only relevant on the first call.
   function openLong(uint size, uint strike, uint minGet, address referrer) public payable returns (uint, uint) {
-    // Mint short token of USD/ETH pair
+    // Mint short token of USD/TOKEN pair
     uint action = MintShort | (getSlot(strike) << 2) | (size << 18);
     uint[] memory actions = new uint[](1);
     actions[0] = action;
-    return execute(actions, 0, minGet, referrer);
+    return execute(actions, uint256(-1), minGet, referrer);
   }
 
   /// @dev Close a long position of the contract, which is equivalent to closing a short position of the inverse pair.
   /// @param size The size of the contract. One contract is close to 1 USD in value.
   /// @param strike The price which the leverage token is worth 0.
-  /// @param maxPay The maximum pay value in ETH the caller is willing to commit.
+  /// @param maxPay The maximum pay size in leveraged token the caller is willing to commit.
   /// @param referrer The address that refers this trader. Only relevant on the first call.
   function closeLong(uint size, uint strike, uint maxPay, address referrer) public returns (uint, uint) {
-    // Burn short token of USD/ETH pair
+    // Burn short token of USD/TOKEN pair
     uint action = BurnShort | (getSlot(strike) << 2) | (size << 18);
     uint[] memory actions = new uint[](1);
     actions[0] = action;
@@ -335,13 +350,13 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   }
 
   /// @dev Open a SHORT position of the contract, which is equivalent to opening a long position of the inverse pair.
-  ///      For example, a short position of ETH/USD inverse contract can be viewed as long position of USD/ETH contract.
+  ///      For example, a short position of TOKEN/USD inverse contract can be viewed as long position of USD/ETH contract.
   /// @param size The size of the contract. One contract is close to 1 USD in value.
   /// @param strike The price which the leverage token is worth 0.
   /// @param maxPay The maximum pay value in ETH the caller is willing to commit.
   /// @param referrer The address that refers this trader. Only relevant on the first call.
   function openShort(uint size, uint strike, uint maxPay, address referrer) public payable returns (uint, uint) {
-    // Mint long token of USD/ETH pair
+    // Mint long token of USD/TOKEN pair
     uint action = MintLong | (getSlot(strike) << 2) | (size << 18);
     uint[] memory actions = new uint[](1);
     actions[0] = action;
@@ -351,10 +366,10 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @dev Close a long position of the contract, which is equivalent to closing a short position of the inverse pair.
   /// @param size The size of the contract. One contract is close to 1 USD in value.
   /// @param strike The price which the leverage token is worth 0.
-  /// @param minGet The minimum get value in ETH the caller is willing to take.
+  /// @param minGet The minimum get value in TOKEN the caller is willing to take.
   /// @param referrer The address that refers this trader. Only relevant on the first call.
   function closeShort(uint size, uint strike, uint minGet, address referrer) public returns (uint, uint) {
-    // Burn long token of USD/ETH pair
+    // Burn long token of USD/TOKEN pair
     uint action = BurnLong | (getSlot(strike) << 2) | (size << 18);
     uint[] memory actions = new uint[](1);
     actions[0] = action;
@@ -364,6 +379,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @dev Collect trading commission for the caller.
   /// @param amount The amount of commission to collect.
   function collect(uint amount) public nonReentrant {
+    console.log("fee", commissionOf[msg.sender]);
     commissionOf[msg.sender] = commissionOf[msg.sender].sub(amount);
     token.uniTransfer(msg.sender, amount);
     emit Collect(msg.sender, amount);
@@ -425,12 +441,17 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @param timeElapsed The number of seconds since last shift update.
   function _updateShift(uint timeElapsed) internal {
     uint target = oracle.getPrice();
-    int change;
+    console.log("oracle price", target);
+    console.log("mark price", mark);
+    int change = 0;
     if (mark.fdiv(fundingAdjustThreshold) > target) {
       change = mark.mul(timeElapsed).toInt256().mul(-1).fmul(maxShiftChangePerSecond);
+      console.log("change0", (change.mul(-1)).toUint256());
     } else if (mark.fmul(fundingAdjustThreshold) < target) {
       change = mark.mul(timeElapsed).toInt256().fmul(maxShiftChangePerSecond);
+      console.log("change1", change.toUint256());
     } else {
+      console.log("change2", change.toUint256());
       return; // nothing to do here
     }
     int prevShift = shift;
@@ -496,6 +517,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @param size The amount of position tokens to mint.
   function _doMint(uint ident, uint size) internal returns (uint) {
     uint strike = getStrike(ident);
+//    console.log("do mint strike", strike);
     if (strike == 0) {
       IPika(pika).mint(msg.sender, size);
       return 0;
@@ -517,7 +539,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
       return 0;
     }
     uint supply = supplyOf[ident];
-    uint value = strike.fmul(supply).sub(strike.fmul(supply.sub(size)));
+    uint value = strike.fmul(supply.add(size)).sub(strike.fmul(supply));
     supplyOf[ident] = supply.sub(size);
     _burn(msg.sender, ident, size);
     return value;
@@ -526,9 +548,16 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @dev Buy virtual tokens and return the amount of quote tokens required.
   /// @param size The amount of tokens to buy.
   function _doBuy(uint size) internal returns (uint) {
+    console.log("reserve", reserve);
+    console.log("coeff", coeff);
     uint nextReserve = reserve.sub(size);
+    console.log("nextReserve", nextReserve);
+    console.log("sub", coeff.div(reserve));
     uint base = coeff.div(nextReserve).sub(coeff.div(reserve));
     int premium = shift.fmul(reserve).sub(shift.fmul(nextReserve));
+//    console.log("baseReserve", )
+    console.log("base", base);
+    console.log("premium", premium.toUint256());
     reserve = nextReserve;
     return base.toInt256().add(premium).toUint256();
   }
@@ -591,30 +620,32 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     return px.toInt256().add(shift).toUint256();
   }
 
-  /// @dev Get leverage number (multiply 100) for a given strike price
+  /// @dev Get leverage number for a given strike price
   /// @param strike The price which leverage position will expire(gets liquidated).
   function getLeverageFromStrike(uint256 strike) public view returns(uint) {
     uint latestMark = getLatestMark();
     if (latestMark > strike ) {
-      return latestMark.mul(100).div(latestMark - strike);
+      return latestMark.fdiv(latestMark - strike);
     }
-    return latestMark.mul(100).div(strike - latestMark);
+    return latestMark.fdiv(strike - latestMark);
   }
 
   /// @dev Get strike price from target leverage
-  /// @param leverage The leverage(divide by 100) of the position.
+  /// @param leverage The leverage of the position.
   function getStrikeFromLeverage(uint256 leverage, bool isLong) public view returns(uint) {
     uint latestMark = getLatestMark();
+//    console.log("latestMark", latestMark);
     if (isLong) {
-      return latestMark.add(latestMark.mul(100).div(leverage));
+      return latestMark.add(latestMark.fdiv(leverage));
     }
-    return latestMark.sub(latestMark.mul(100).div(leverage));
+    return latestMark.sub(latestMark.fdiv(leverage));
   }
 
 
   /// @dev Get the mark price, computed as average spot prices with decay.
   /// @param timeElapsed The number of seconds since last mark price update.
   function getMark(uint timeElapsed) public view returns (uint) {
+//    console.log("timeElapsed", timeElapsed);
     uint total = 1e18;
     uint each = decayPerSecond;
     while (timeElapsed > 0) {
