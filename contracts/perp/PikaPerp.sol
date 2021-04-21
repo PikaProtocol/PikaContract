@@ -373,7 +373,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     uint action = BurnLong | (getSlot(strike) << 2) | (size << 18);
     uint[] memory actions = new uint[](1);
     actions[0] = action;
-    return execute(actions, 0, minGet, referrer);
+    return execute(actions, uint256(-1), minGet, referrer);
   }
 
   /// @dev Collect trading commission for the caller.
@@ -517,7 +517,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @param size The amount of position tokens to mint.
   function _doMint(uint ident, uint size) internal returns (uint) {
     uint strike = getStrike(ident);
-//    console.log("do mint strike", strike);
+    console.log("do mint ident", ident);
     if (strike == 0) {
       IPika(pika).mint(msg.sender, size);
       return 0;
