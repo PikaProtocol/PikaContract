@@ -254,6 +254,8 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
         pay = pay.add(_doBurn(getLongIdent(slot), size));
       } else if (kind == MintShort) {
         require(status != MarketStatus.NoMint, 'no minting allowed');
+        console.log("slot", slot);
+        console.log("minSafeShortSlot", minSafeShortSlot);
         require(slot >= minSafeShortSlot, 'strike price is too low');
         sell = sell.add(size);
         pay = pay.add(_doMint(getShortIdent(slot), size));
@@ -486,6 +488,8 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
       uint ident = getShortIdent(_prevMinSafeShortSlot);
       uint size = supplyOf[ident];
       emit Liquidate(ident, size);
+//      console.log("liquidating", size);
+//      console.log("ident", ident);
       burden = burden.sub(size.toInt256());
       insurance = insurance.add(size.fdiv(strike).toInt256());
       shortOffsetOf[_prevMinSafeShortSlot]++;
@@ -613,6 +617,16 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
       return (100 + prefix) * (10**(magnitude - 1)); // never overflow
     }
   }
+  /// @dev Return the current user position of leveraged token for a strike.
+  /// @param account Address of a user.
+  /// @param strike The price which the leverage token is worth 0.
+  /// @param isLong Whether is long or short in terms of USD/TOKEN pair.
+  function getPosition(address account, uint strike, bool isLong) public view returns (uint) {
+      uint slot = getSlot(strike);
+      uint ident = isLong ? getLongIdent(slot) : getShortIdent(slot);
+      return balanceOf(account, ident);
+  }
+
 
   /// @dev Return the current approximate spot price of this perp market.
   function getSpotPx() public view returns (uint) {
@@ -632,13 +646,14 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
 
   /// @dev Get strike price from target leverage
   /// @param leverage The leverage of the position.
+  /// @param isLong Whether is long or short in terms of USD/TOKEN pair.
   function getStrikeFromLeverage(uint256 leverage, bool isLong) public view returns(uint) {
     uint latestMark = getLatestMark();
 //    console.log("latestMark", latestMark);
     if (isLong) {
-      return latestMark.add(latestMark.fdiv(leverage));
+      return latestMark.sub(latestMark.fdiv(leverage));
     }
-    return latestMark.sub(latestMark.fdiv(leverage));
+    return latestMark.add(latestMark.fdiv(leverage));
   }
 
 
