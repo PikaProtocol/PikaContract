@@ -76,6 +76,8 @@ describe("PikaPerp", function () {
     await this.pikaPerp.initialize(
       this.uri, this.pika.address, "0x0000000000000000000000000000000000000000", this.oracle.address, this.coeff, this.reserve, this.liquidationPerSec, this.rewardDistributor.address
     )
+    await this.pika.grantRole(await this.pika.MINTER_ROLE(), this.pikaPerp.address)
+    await this.pika.grantRole(await this.pika.BURNER_ROLE(), this.pikaPerp.address)
   })
 
 
@@ -347,6 +349,70 @@ describe("PikaPerp", function () {
       from: this.alice.address,
       gasPrice: "0"
     })).to.be.revertedWith("SafeMath: subtraction overflow")
+  })
+
+  describe("test execute with aggregated actions", function() {
+    it("should execute", async function () {
+      // 1. Execute a combination of MintLong and MintShort with same size
+      const size = "1000000000000000000000" // 1000 usd
+      const firstLongStrike = await this.pikaPerp.getStrikeFromLeverage("5000000000000000000", true);  // the strike for 5x long is 1667
+      const firstShortStrike = await this.pikaPerp.getStrikeFromLeverage("5000000000000000000", false);  // the strike for 5x short is 2500
+      const firstLongAction = 2n | (BigInt(await this.pikaPerp.getSlot(firstLongStrike)) << 2n) | (BigInt(size) << 18n);
+      const secondShortAction = 0n | (BigInt(await this.pikaPerp.getSlot(firstShortStrike)) << 2n) | (BigInt(size) << 18n);
+      const referrer = this.referrer.address
+      const firstInitialEthBalance = await provider.getBalance(this.alice.address);
+      await this.pikaPerp.execute([firstLongAction, secondShortAction], "600000000000000000", "0", referrer, {from: this.alice.address, value: "1000000000000000000", gasPrice: "0"}) // 1eth
+      // verity eth paid
+      const firstExpectedPay = BigNumber.from("600000000000000000")  // 0.6 eth , 1/1667 * 1000
+      const firstExpectedGet = BigNumber.from("400000000000000000") // 0.4 eth, 1/2500 * 1000
+      const firstExpectedEthPaid = firstExpectedPay.sub(firstExpectedGet)
+      const firstEthPaid = (firstInitialEthBalance - await provider.getBalance(this.alice.address)).toString()
+      assertAlmostEqual(firstEthPaid, firstExpectedEthPaid)
+      // check leverage token balance
+      const firstLongIdent = await this.pikaPerp.getShortIdent(await this.pikaPerp.getSlot(firstLongStrike))
+      const firstShortIdent = await this.pikaPerp.getLongIdent(await this.pikaPerp.getSlot(firstShortStrike));
+      expect(await this.pikaPerp.balanceOf(this.alice.address, firstLongIdent)).to.equal(size);
+      expect(await this.pikaPerp.balanceOf(this.alice.address, firstShortIdent)).to.equal(size);
+      // check protocol eth balance
+      const protocolBalance = await provider.getBalance(this.pikaPerp.address);
+      assertAlmostEqual(protocolBalance, firstExpectedEthPaid);
+      // check insurance amount to be 0. Since long and short amounts are equal, no trading fee is collected.
+      expect(await this.pikaPerp.insurance()).to.equal(0)
+      // check new spot price equals original price, since long and short amounts are equal.
+      const newSpot = await this.pikaPerp.getSpotPx();
+      expect(newSpot).to.equal(5E14)
+
+      // 2. Execute a combination of MintLong and MintShort for a new strike, CloseLong and CloseShort for the previous strike
+      const secondLongStrike = await this.pikaPerp.getStrikeFromLeverage("3000000000000000000", true);  // the strike for 5x long is 1500
+      const secondShortStrike = await this.pikaPerp.getStrikeFromLeverage("3000000000000000000", false);  // the strike for 5x short is 3000
+      console.log(secondLongStrike.toString(), secondShortStrike.toString())
+      const longAction = 2n | (BigInt(await this.pikaPerp.getSlot(secondLongStrike)) << 2n) | (BigInt(size) << 18n);
+      const shortAction = 0n | (BigInt(await this.pikaPerp.getSlot(secondShortStrike)) << 2n) | (BigInt(size) << 18n);
+      const closeLongAction = 3n | (BigInt(await this.pikaPerp.getSlot(firstLongStrike)) << 2n) | (BigInt(size) << 18n);
+      const closeShortAction = 1n | (BigInt(await this.pikaPerp.getSlot(firstShortStrike)) << 2n) | (BigInt(size) << 18n);
+      const secondInitialEthBalance = await provider.getBalance(this.alice.address);
+      await this.pikaPerp.execute([longAction, shortAction, closeLongAction, closeShortAction], "1500000000000000000", "0", referrer, {from: this.alice.address, value: "1000000000000000000", gasPrice: "0"}) // 1eth
+      // check leverage token balance
+      // verity eth paid
+      const secondExpectedPay = BigNumber.from("1066000000000000000")  // 1.066eth , 1/2500 * 1000 + 1/1500 * 1000
+      const secondExpectedGet = BigNumber.from("933000000000000000") // 0.933 eth, 1/1667 * 1000 + 1/3000 * 1000
+      const secondExpectedEthPaid = secondExpectedPay.sub(secondExpectedGet)
+      const secondEthPaid = (secondInitialEthBalance - await provider.getBalance(this.alice.address)).toString()
+      assertAlmostEqual(secondEthPaid, secondExpectedEthPaid, 1000)
+      // verify positions
+      const secondLongIdent = await this.pikaPerp.getShortIdent(await this.pikaPerp.getSlot(secondLongStrike))
+      const secondShortIdent = await this.pikaPerp.getLongIdent(await this.pikaPerp.getSlot(secondShortStrike));
+      expect(await this.pikaPerp.balanceOf(this.alice.address, secondLongIdent)).to.equal(size);
+      expect(await this.pikaPerp.balanceOf(this.alice.address, secondShortIdent)).to.equal(size);
+      expect(await this.pikaPerp.balanceOf(this.alice.address, firstLongIdent)).to.equal(0);
+      expect(await this.pikaPerp.balanceOf(this.alice.address, firstShortIdent)).to.equal(0);
+      // check protocol eth balance
+      assertAlmostEqual(await provider.getBalance(this.pikaPerp.address), secondExpectedEthPaid.add(firstExpectedEthPaid));
+      // check insurance amount to be 0. Since long and short amounts are equal, no trading fee is collected.
+      expect(await this.pikaPerp.insurance()).to.equal(0)
+      // check new spot price equals original price, since long and short amounts are equal.
+      expect(await this.pikaPerp.getSpotPx()).to.equal(5E14)
+    })
   })
 
   describe("test liquidation success", function () {
@@ -642,40 +708,36 @@ describe("PikaPerp", function () {
       const newSpot = await this.pikaPerp.getSpotPx();
       assertAlmostEqual(newSpot, 4.998916817E14) // 5e10 / ((1e7 - 1000)*(1e7 - 1000)) + shift = 0.0004998916817
     })
+  })
 
-    // it("should openShort success with shift", async function () {
-    //   const size = "1000000000000000000000" // 1000 usd
-    //   const maxGet = "600000000000000000" // 0.6 eth
-    //   const strike = await this.pikaPerp.getStrikeFromLeverage("5000000000000000000", true);  // the strike for 5x long is 1667
-    //   const referrer = this.referrer.address
-    //   // set oracle price to 1/1667, which is more than 2.5% from the
-    //   await this.oracle.setPrice(600000000000000);
-    //   const initialEthBalance = await provider.getBalance(this.alice.address);
-    //   const maxShiftChangePerSecond = await this.pikaPerp.maxShiftChangePerSecond();
-    //   const lastPoke = await this.pikaPerp.lastPoke();
-    //   const mark = await this.pikaPerp.mark();
-    //   await provider.send("evm_increaseTime", [3600])
-    //   await this.pikaPerp.openLong(size, strike, minGet, referrer, {
-    //     from: this.alice.address,
-    //     value: "101095057500000000",
-    //     gasPrice: "0"
-    //   }) // 1eth
-    //   // verity eth paid
-    //   const timeElapsed = (await this.pikaPerp.lastPoke()).sub(lastPoke)
-    //   const shift = await this.pikaPerp.shift()
-    //   const expectedShift = timeElapsed.mul(maxShiftChangePerSecond).mul(mark).div("1000000000000000000")
-    //   assertAlmostEqual(expectedShift, shift, 1000)
-    //   const expectedPay = BigNumber.from("600000000000000000")  // 0.6 eth = 1/1667 * 1000
-    //   const expectedGet = BigNumber.from("498907942500000000") // 0.4989079425 eth = (5e3 - 5e10 / (1e7 + 1000) + (shift * 1000)) * (1 - TRADING_FEE)
-    //   const expectedGetWithoutFee = BigNumber.from("500158338300000000") // 0.5001583383 eth = (5e3 - 5e10 / (1e7 + 1000) + (shift * 1000))
-    //   const expectedEthPaid = expectedPay.sub(expectedGet)
-    //   const currentEthBalance = await provider.getBalance(this.alice.address)
-    //   const ethPaid = (initialEthBalance.sub(currentEthBalance)).toString()
-    //   assertAlmostEqual(ethPaid, expectedEthPaid)
-    //   // check new spot price
-    //   const newSpot = await this.pikaPerp.getSpotPx();
-    //   assertAlmostEqual(newSpot, 5.001083483E14) // 5e10 / ((1e7 + 1000)*(1e7 + 1000)) + shift = 0.0005001083483
-    // })
+  describe("test mint and burn PIKA", function () {
+    it("should openShort with 1x leverage mint PIKA", async function () {
+      // 1. test mint PIKA
+      const size = "1000000000000000000000" // 1000 usd
+      const maxPay = "600000000000000000" // 0.6 eth
+      const strike = await this.pikaPerp.getStrikeFromLeverage("1000000000000000000", false);  // the strike for 1x short is 0
+      const initialEthBalance = await provider.getBalance(this.alice.address);
+      await this.pikaPerp.openShort(size, strike, maxPay, this.referrer.address, {from: this.alice.address, value: "1000000000000000000", gasPrice: "0"}) // 1eth
+      // verity eth paid
+      const expectedPay = BigNumber.from("501300130013460100")  // 0.5013001300134601 eth = (5e10 / (1e7 - 1000) - 5e3) * (1 + TRADING_FEE)
+      const expectedGet = BigNumber.from("0") // 0.4 eth = 0 * 1000
+      const expectedEthPaid = expectedPay.sub(expectedGet)
+      const currentEthBalance = await provider.getBalance(this.alice.address)
+      const ethPaid = (initialEthBalance - currentEthBalance).toString() // 0.101300130012987400 eth
+      assertAlmostEqual(ethPaid, expectedEthPaid)
+      // check leverage token balance
+      const ident = await this.pikaPerp.getLongIdent(await this.pikaPerp.getSlot(strike));
+      const leverageTokenBalance = await this.pikaPerp.balanceOf(this.alice.address, ident);
+      // verify no leveraged token is minted
+      expect(leverageTokenBalance).to.equal(0);
+      const pikaBalance = await this.pika.balanceOf(this.alice.address);
+      expect(pikaBalance).to.equal(size)
+
+      // 2. test burn pika
+      const minGet = "300000000000000000" // 0.3 eth
+      await this.pikaPerp.closeShort(size, strike, minGet, this.referrer.address, {from: this.alice.address}) // 1eth
+      expect(await this.pika.balanceOf(this.alice.address)).to.equal(0)
+    })
   })
 
 
