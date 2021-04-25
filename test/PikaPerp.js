@@ -3,7 +3,8 @@
 const { expect, should } = require("chai");
 const hre = require("hardhat");
 const { waffle } = require("hardhat");
-const { BigNumber, ethers, utils } = require("ethers");
+const { BigNumber, ethers } = require("ethers");
+const utils = require('web3-utils');
 
 const provider = waffle.provider;
 // const provider = ethers.getDefaultProvider()
@@ -737,6 +738,79 @@ describe("PikaPerp", function () {
       const minGet = "300000000000000000" // 0.3 eth
       await this.pikaPerp.closeShort(size, strike, minGet, this.referrer.address, {from: this.alice.address}) // 1eth
       expect(await this.pika.balanceOf(this.alice.address)).to.equal(0)
+    })
+  })
+
+  describe("test set liquidity", function () {
+    it("should setLiquidity higher", async function () {
+      const size = "100000000000000000000000" // 100000 usd
+      const minGet = "30000000000000000000" // 30 eth
+      const strike = await this.pikaPerp.getStrikeFromLeverage("5000000000000000000", true);  // the strike for 5x long is 1667
+      const referrer = this.referrer.address
+      await this.pikaPerp.openLong(size, strike, minGet, referrer, {
+        from: this.alice.address,
+        value: "100000000000000000000",
+        gasPrice: "0"
+      }) // 100eth
+      const newSpot = await this.pikaPerp.getSpotPx()
+      const coeff = await this.pikaPerp.coeff()
+      const reserve0 = await this.pikaPerp.reserve0()
+      const reserve = await this.pikaPerp.reserve()
+      const insurance = await this.pikaPerp.insurance()
+      console.log(reserve0.toString(), reserve.toString())
+      console.log("newSpot", newSpot.toString())
+      assertAlmostEqual(newSpot, 4.901480247E14) // 5e10 / ((1e7 + 100000)*(1e7 + 100000)) = 0.0004901480247
+      // set liquidity 10% higher
+      const nextCoeff = coeff.add(coeff.div(10))
+      const nextReserve = BigNumber.from((Math.sqrt(Number(nextCoeff.div(newSpot)))).toString()).mul(1e9);
+      const nextReserve0 = nextReserve.add(reserve0).sub(reserve);
+      await this.pikaPerp.setLiquidity(nextCoeff, nextReserve0)
+      expect(await this.pikaPerp.coeff()).to.equal(nextCoeff)
+      expect(await this.pikaPerp.reserve()).to.equal(nextReserve)
+      expect(await this.pikaPerp.reserve0()).to.equal(nextReserve0)
+      const nextInsurance = await this.pikaPerp.insurance()
+      const prevVal = coeff.div(reserve).sub(coeff.div(reserve0));
+      const nextVal = nextCoeff.div(nextReserve).sub(nextCoeff.div(nextReserve0));
+      // verify insurance decreased by (nextVal - prevVal)
+      assertAlmostEqual(insurance.sub(nextInsurance), nextVal.sub(prevVal))
+      // verify the spot price is the same as before setting the liquidity
+      assertAlmostEqual(await this.pikaPerp.getSpotPx(), newSpot);
+    })
+
+    it("should setLiquidity lower", async function () {
+      const size = "100000000000000000000000" // 100000 usd
+      const minGet = "30000000000000000000" // 30 eth
+      const strike = await this.pikaPerp.getStrikeFromLeverage("5000000000000000000", true);  // the strike for 5x long is 1667
+      const referrer = this.referrer.address
+      await this.pikaPerp.openLong(size, strike, minGet, referrer, {
+        from: this.alice.address,
+        value: "100000000000000000000",
+        gasPrice: "0"
+      }) // 100eth
+      const newSpot = await this.pikaPerp.getSpotPx()
+      const coeff = await this.pikaPerp.coeff()
+      const reserve0 = await this.pikaPerp.reserve0()
+      const reserve = await this.pikaPerp.reserve()
+      const insurance = await this.pikaPerp.insurance()
+      console.log(reserve0.toString(), reserve.toString())
+      console.log("newSpot", newSpot.toString())
+      assertAlmostEqual(newSpot, 4.901480247E14) // 5e10 / ((1e7 + 100000)*(1e7 + 100000)) = 0.0004901480247
+      // set liquidity 10% lower
+      const nextCoeff = coeff.sub(coeff.div(10))
+      const nextReserve = BigNumber.from((Math.sqrt(Number(nextCoeff.div(newSpot)))).toString()).mul(1e9);
+      const nextReserve0 = nextReserve.add(reserve0).sub(reserve);
+      await this.pikaPerp.setLiquidity(nextCoeff, nextReserve0)
+      expect(await this.pikaPerp.coeff()).to.equal(nextCoeff)
+      expect(await this.pikaPerp.reserve()).to.equal(nextReserve)
+      expect(await this.pikaPerp.reserve0()).to.equal(nextReserve0)
+      const nextInsurance = await this.pikaPerp.insurance()
+      const prevVal = coeff.div(reserve).sub(coeff.div(reserve0));
+      const nextVal = nextCoeff.div(nextReserve).sub(nextCoeff.div(nextReserve0));
+      console.log("increase", nextVal - prevVal)
+      // verify insurance increase by (prevVal - nextVal)
+      assertAlmostEqual(nextInsurance.sub(insurance), prevVal.sub(nextVal))
+      // verify the spot price is the same as before setting the liquidity
+      assertAlmostEqual(await this.pikaPerp.getSpotPx(), newSpot);
     })
   })
 
