@@ -52,15 +52,13 @@ describe("PikaPerp", function () {
     this.dev = this.wallets[3]
     this.referrer = this.wallets[4]
     this.rewardDistributor = this.wallets[5]
-    const initialEthBalance = await provider.getBalance(this.alice.address);
-    console.log("initial balance", initialEthBalance.toString());
-
     this.token = this.wallets[6]
-
-    this.perp = await hre.ethers.getContractFactory("PikaPerp");
+    // this.pikaLib = await hre.ethers.getContractFactory("PikaLib");
+    this.perp = await hre.ethers.getContractFactory("PikaPerp")
     this.tokenERC = await hre.ethers.getContractFactory("SimpleERC20");
     this.linkoracle = await hre.ethers.getContractFactory("SimpleOracle");
     this.pikacontract = await hre.ethers.getContractFactory("Pika")
+    this.perpLib = await hre.ethers.getContractFactory("PerpLib")
   })
 
   beforeEach(async function () {
@@ -138,7 +136,7 @@ describe("PikaPerp", function () {
       console.log("eth paid", ethPaid)
       assertAlmostEqual(ethPaid, expectedEthPaid)
       // check leverage token balance
-      const ident = await this.pikaPerp.getShortIdent(await this.pikaPerp.getSlot(strike));
+      const ident = await this.pikaPerp.getShortIdent(getSlot(strike));
       const tokenBalance = await this.pikaPerp.balanceOf(this.alice.address, ident);
       expect(tokenBalance).to.equal(size);
       // check protocol eth balance
@@ -217,7 +215,7 @@ describe("PikaPerp", function () {
         value: "1000000000000000000",
         gasPrice: "0"
       }) // 1eth
-      const ident = await this.pikaPerp.getShortIdent(await this.pikaPerp.getSlot(strike));
+      const ident = await this.pikaPerp.getShortIdent(getSlot(strike));
       expect(await this.pikaPerp.balanceOf(this.alice.address, ident)).to.equal(size);
       expect(await this.pikaPerp.getPosition(this.alice.address, strike, true)).to.equal(size);
 
@@ -267,7 +265,7 @@ describe("PikaPerp", function () {
     const ethPaid = (initialEthBalance - currentEthBalance).toString() // 0.101300130012987400 eth
     assertAlmostEqual(ethPaid, expectedEthPaid)
     // check leverage token balance
-    const ident = await this.pikaPerp.getLongIdent(await this.pikaPerp.getSlot(strike));
+    const ident = await this.pikaPerp.getLongIdent(getSlot(strike));
     const tokenBalance = await this.pikaPerp.balanceOf(this.alice.address, ident);
     expect(tokenBalance).to.equal(size);
     // check protocol eth balance
@@ -324,7 +322,7 @@ describe("PikaPerp", function () {
       value: "1000000000000000000",
       gasPrice: "0"
     }) // 1eth
-    const ident = await this.pikaPerp.getLongIdent(await this.pikaPerp.getSlot(strike));
+    const ident = await this.pikaPerp.getLongIdent(getSlot(strike));
     expect(await this.pikaPerp.balanceOf(this.alice.address, ident)).to.equal(size);
     expect(await this.pikaPerp.getPosition(this.alice.address, strike, false)).to.equal(size);
 
@@ -358,8 +356,8 @@ describe("PikaPerp", function () {
       const size = "1000000000000000000000" // 1000 usd
       const firstLongStrike = await this.pikaPerp.getStrikeFromLeverage("5000000000000000000", true);  // the strike for 5x long is 1667
       const firstShortStrike = await this.pikaPerp.getStrikeFromLeverage("5000000000000000000", false);  // the strike for 5x short is 2500
-      const firstLongAction = 2n | (BigInt(await this.pikaPerp.getSlot(firstLongStrike)) << 2n) | (BigInt(size) << 18n);
-      const secondShortAction = 0n | (BigInt(await this.pikaPerp.getSlot(firstShortStrike)) << 2n) | (BigInt(size) << 18n);
+      const firstLongAction = 2n | (BigInt(getSlot(firstLongStrike)) << 2n) | (BigInt(size) << 18n);
+      const secondShortAction = 0n | (BigInt(getSlot(firstShortStrike)) << 2n) | (BigInt(size) << 18n);
       const referrer = this.referrer.address
       const firstInitialEthBalance = await provider.getBalance(this.alice.address);
       await this.pikaPerp.execute([firstLongAction, secondShortAction], "600000000000000000", "0", referrer, {from: this.alice.address, value: "1000000000000000000", gasPrice: "0"}) // 1eth
@@ -370,8 +368,8 @@ describe("PikaPerp", function () {
       const firstEthPaid = (firstInitialEthBalance - await provider.getBalance(this.alice.address)).toString()
       assertAlmostEqual(firstEthPaid, firstExpectedEthPaid)
       // check leverage token balance
-      const firstLongIdent = await this.pikaPerp.getShortIdent(await this.pikaPerp.getSlot(firstLongStrike))
-      const firstShortIdent = await this.pikaPerp.getLongIdent(await this.pikaPerp.getSlot(firstShortStrike));
+      const firstLongIdent = await this.pikaPerp.getShortIdent(getSlot(firstLongStrike))
+      const firstShortIdent = await this.pikaPerp.getLongIdent(getSlot(firstShortStrike));
       expect(await this.pikaPerp.balanceOf(this.alice.address, firstLongIdent)).to.equal(size);
       expect(await this.pikaPerp.balanceOf(this.alice.address, firstShortIdent)).to.equal(size);
       // check protocol eth balance
@@ -387,10 +385,10 @@ describe("PikaPerp", function () {
       const secondLongStrike = await this.pikaPerp.getStrikeFromLeverage("3000000000000000000", true);  // the strike for 5x long is 1500
       const secondShortStrike = await this.pikaPerp.getStrikeFromLeverage("3000000000000000000", false);  // the strike for 5x short is 3000
       console.log(secondLongStrike.toString(), secondShortStrike.toString())
-      const longAction = 2n | (BigInt(await this.pikaPerp.getSlot(secondLongStrike)) << 2n) | (BigInt(size) << 18n);
-      const shortAction = 0n | (BigInt(await this.pikaPerp.getSlot(secondShortStrike)) << 2n) | (BigInt(size) << 18n);
-      const closeLongAction = 3n | (BigInt(await this.pikaPerp.getSlot(firstLongStrike)) << 2n) | (BigInt(size) << 18n);
-      const closeShortAction = 1n | (BigInt(await this.pikaPerp.getSlot(firstShortStrike)) << 2n) | (BigInt(size) << 18n);
+      const longAction = 2n | (BigInt(parseInt(getSlot(secondLongStrike))) << 2n) | (BigInt(size) << 18n);
+      const shortAction = 0n | (BigInt(parseInt(getSlot(secondShortStrike))) << 2n) | (BigInt(size) << 18n);
+      const closeLongAction = 3n | (BigInt(parseInt(getSlot(firstLongStrike))) << 2n) | (BigInt(size) << 18n);
+      const closeShortAction = 1n | (BigInt(parseInt(getSlot(firstShortStrike))) << 2n) | (BigInt(size) << 18n);
       const secondInitialEthBalance = await provider.getBalance(this.alice.address);
       await this.pikaPerp.execute([longAction, shortAction, closeLongAction, closeShortAction], "1500000000000000000", "0", referrer, {from: this.alice.address, value: "1000000000000000000", gasPrice: "0"}) // 1eth
       // check leverage token balance
@@ -401,8 +399,8 @@ describe("PikaPerp", function () {
       const secondEthPaid = (secondInitialEthBalance - await provider.getBalance(this.alice.address)).toString()
       assertAlmostEqual(secondEthPaid, secondExpectedEthPaid, 1000)
       // verify positions
-      const secondLongIdent = await this.pikaPerp.getShortIdent(await this.pikaPerp.getSlot(secondLongStrike))
-      const secondShortIdent = await this.pikaPerp.getLongIdent(await this.pikaPerp.getSlot(secondShortStrike));
+      const secondLongIdent = await this.pikaPerp.getShortIdent(parseInt(getSlot(secondLongStrike)))
+      const secondShortIdent = await this.pikaPerp.getLongIdent(parseInt(getSlot(secondShortStrike)));
       expect(await this.pikaPerp.balanceOf(this.alice.address, secondLongIdent)).to.equal(size);
       expect(await this.pikaPerp.balanceOf(this.alice.address, secondShortIdent)).to.equal(size);
       expect(await this.pikaPerp.balanceOf(this.alice.address, firstLongIdent)).to.equal(0);
@@ -428,7 +426,7 @@ describe("PikaPerp", function () {
         value: "1000000000000000000",
         gasPrice: "0"
       }) // 1eth
-      const slot = parseInt(await this.pikaPerp.getSlot(longStrike));
+      const slot = parseInt(getSlot(longStrike));
       const ident = await this.pikaPerp.getShortIdent(slot);
       expect(await this.pikaPerp.balanceOf(this.alice.address, ident)).to.equal(longSize);
       console.log("mark1", (await this.pikaPerp.mark()).toString())
@@ -467,7 +465,7 @@ describe("PikaPerp", function () {
         value: "1000000000000000000",
         gasPrice: "0"
       }) // 1eth
-      const slot = parseInt(await this.pikaPerp.getSlot(longStrike));
+      const slot = parseInt(getSlot(longStrike));
       const ident = await this.pikaPerp.getShortIdent(slot);
       expect(await this.pikaPerp.balanceOf(this.alice.address, ident)).to.equal(longSize);
       console.log("mark1", (await this.pikaPerp.mark()).toString())
@@ -507,7 +505,7 @@ describe("PikaPerp", function () {
         value: "1000000000000000000",
         gasPrice: "0"
       }) // 1eth
-      const slot = parseInt(await this.pikaPerp.getSlot(shortStrike));
+      const slot = parseInt(getSlot(shortStrike));
       const ident = await this.pikaPerp.getLongIdent(slot);
       expect(await this.pikaPerp.balanceOf(this.alice.address, ident)).to.equal(shortSize);
       expect(await this.pikaPerp.getPosition(this.alice.address, shortStrike, false)).to.equal(shortSize);
@@ -544,7 +542,7 @@ describe("PikaPerp", function () {
         value: "1000000000000000000",
         gasPrice: "0"
       }) // 1eth
-      const slot = parseInt(await this.pikaPerp.getSlot(shortStrike));
+      const slot = parseInt(getSlot(shortStrike));
       const ident = await this.pikaPerp.getLongIdent(slot);
       expect(await this.pikaPerp.balanceOf(this.alice.address, ident)).to.equal(shortSize);
       expect(await this.pikaPerp.getPosition(this.alice.address, shortStrike, false)).to.equal(shortSize);
@@ -727,7 +725,7 @@ describe("PikaPerp", function () {
       const ethPaid = (initialEthBalance - currentEthBalance).toString() // 0.101300130012987400 eth
       assertAlmostEqual(ethPaid, expectedEthPaid)
       // check leverage token balance
-      const ident = await this.pikaPerp.getLongIdent(await this.pikaPerp.getSlot(strike));
+      const ident = await this.pikaPerp.getLongIdent(getSlot(strike));
       const leverageTokenBalance = await this.pikaPerp.balanceOf(this.alice.address, ident);
       // verify no leveraged token is minted
       expect(leverageTokenBalance).to.equal(0);

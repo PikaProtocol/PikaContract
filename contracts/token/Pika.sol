@@ -2,6 +2,8 @@
 
 pragma solidity 0.6.12;
 
+import "hardhat/console.sol";
+
 import "./IPika.sol";
 import "./IRewardDistributor.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
@@ -62,6 +64,7 @@ contract Pika is IPika, ERC20, AccessControl {
 
     function burn(address from, uint256 amount) public override {
         require(hasRole(BURNER_ROLE, msg.sender), "Caller is not a burner");
+        console.log("burn", msg.sender);
         _burn(from, amount);
     }
 

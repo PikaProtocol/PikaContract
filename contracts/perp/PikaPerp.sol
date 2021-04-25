@@ -20,7 +20,8 @@ import '@openzeppelin/contracts-upgradeable/utils/SafeCastUpgradeable.sol';
 import './IPikaPerp.sol';
 import '../token/IPika.sol';
 import '../lib/PerpMath.sol';
-import "../lib/UniERC20.sol";
+import '../lib/PerpLib.sol';
+import '../lib/UniERC20.sol';
 import '../oracle/IOracle.sol';
 
 /*
@@ -38,6 +39,7 @@ import '../oracle/IOracle.sol';
  */
 contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeable, IPikaPerp {
   using PerpMath for uint;
+  using PerpLib for uint;
   using PerpMath for int;
 
   using SafeMathUpgradeable for uint;
@@ -91,6 +93,15 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     uint amount // The amount of tokens collected.
   );
 
+  event LiquidityChanged(
+    uint coeff,  // coefficient factor before the change
+    uint reserve0, // initial virtual reserve for base tokens before the change
+    uint reserve, // current reserve for base tokens before the change
+    uint nextCoeff, // coefficient factor after the change
+    uint nextReserve0, // initial virtual reserve for base tokens after the change
+    uint nextReserve  // current reserve for base tokens after the change
+  );
+
   uint public constant MintLong = 0;
   uint public constant BurnLong = 1;
   uint public constant MintShort = 2;
@@ -132,7 +143,14 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   uint public reserve0; // The initial virtual reserve for base tokens.
   uint public coeff; // The coefficient factor controlling price slippage.
   uint public reserve; // The current reserve for base tokens.
+  uint public liquidityChangePerSec; // The maximum liquidity change per second.
   uint public liquidationPerSec; // The maximum liquidation amount per second.
+  uint public totalOI; // The sum of open long and short positions.
+  uint public smallDecayTwapOI; // Total open interest with small exponential TWAP decay. This reflects shorter term twap.
+  uint public largeDecayTwapOI; // Total open interest with large exponential TWAP decay. This reflects longer term twap.
+  uint public smallOIDecayPerSecond; // example: 0.999999e18, 99.9999% exponential TWAP decay.
+  uint public largeOIDecayPerSecond; // example: 0.99999e18, 99.999% exponential TWAP decay.
+  uint public OIChangeThreshold; // example: 1.02e18, 105%
 
   address public governor;
   address public pendingGovernor;
@@ -206,7 +224,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     rewardDistributor = _rewardDistributor;
     uint spotPx = getSpotPx();
     mark = spotPx;
-    uint slot = getSlot(spotPx);
+    uint slot = PerpLib.getSlot(spotPx);
     maxSafeLongSlot = slot;
     minSafeShortSlot = slot;
     _moveSlots();
@@ -215,7 +233,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @dev Poke contract state update. Must be called prior to any execution.
   function poke() public {
     uint timeElapsed = now - lastPoke;
-    console.log("timeElapsed", timeElapsed);
+//    console.log("timeElapsed", timeElapsed);
     if (timeElapsed > 0) {
       timeElapsed = MathUpgradeable.min(timeElapsed, maxPokeElapsed);
       _updateMark(timeElapsed);
@@ -246,24 +264,29 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
       uint kind = actions[idx] & ((1 << 2) - 1);
       uint slot = (actions[idx] >> 2) & ((1 << 16) - 1);
       uint size = actions[idx] >> 18;
+      console.log("action", actions[idx]);
       if (kind == MintLong) {
         require(status != MarketStatus.NoMint, 'no minting allowed');
         require(slot <= maxSafeLongSlot, 'strike price is too high');
         buy = buy.add(size);
         get = get.add(_doMint(getLongIdent(slot), size));
+        console.log("get", get);
       } else if (kind == BurnLong) {
         sell = sell.add(size);
         pay = pay.add(_doBurn(getLongIdent(slot), size));
+        console.log("pay", pay);
       } else if (kind == MintShort) {
         require(status != MarketStatus.NoMint, 'no minting allowed');
-        console.log("slot", slot);
-        console.log("minSafeShortSlot", minSafeShortSlot);
+//        console.log("slot", slot);
+//        console.log("minSafeShortSlot", minSafeShortSlot);
         require(slot >= minSafeShortSlot, 'strike price is too low');
         sell = sell.add(size);
         pay = pay.add(_doMint(getShortIdent(slot), size));
+        console.log("pay", pay);
       } else if (kind == BurnShort) {
         buy = buy.add(size);
         get = get.add(_doBurn(getShortIdent(slot), size));
+        console.log("get", get);
       } else {
         assert(false); // not reachable
       }
@@ -282,8 +305,8 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
       fee = tradingFee.fmul(value);
       get = get.add(value).sub(fee);
     }
-//    console.log("max pay", maxPay, pay);
-//    console.log("min get", minGet, get);
+    console.log("max pay", maxPay, pay);
+    console.log("min get", minGet, get);
     require(pay <= maxPay, 'max pay constraint violation');
     require(get >= minGet, 'min get constraint violation');
     // 3. Settle tokens with the executor and collect the trading fee.
@@ -298,7 +321,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     uint reward = pikaRewardRatio.fmul(fee);
     pikaReward = pikaReward.add(reward);
     if (now - lastRewardDistributeTime > 1 hours && pikaReward > 0) {
-      console.log("sending reward");
+//      console.log("sending reward");
       token.uniTransfer(rewardDistributor, pikaReward);
       lastRewardDistributeTime = now;
       emit RewardDistribute(lastRewardDistributeTime, pikaReward);
@@ -320,8 +343,8 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     // 4. Check spot price and mark price consistency.
     uint spotPx = getSpotPx();
     emit Execute(msg.sender, actions, pay, get, fee, spotPx, mark, oracle.getPrice(), insurance, token.uniBalanceOf(address(this)));
-    console.log("spot", spotPx);
-    console.log("mark", mark);
+//    console.log("spot", spotPx);
+//    console.log("mark", mark);
     require(spotPx.fmul(spotMarkThreshold) > mark, 'slippage is too high');
     require(spotPx.fdiv(spotMarkThreshold) < mark, 'slippage is too high');
   }
@@ -334,7 +357,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @param referrer The address that refers this trader. Only relevant on the first call.
   function openLong(uint size, uint strike, uint minGet, address referrer) public payable returns (uint, uint) {
     // Mint short token of USD/TOKEN pair
-    uint action = MintShort | (getSlot(strike) << 2) | (size << 18);
+    uint action = MintShort | (PerpLib.getSlot(strike) << 2) | (size << 18);
     uint[] memory actions = new uint[](1);
     actions[0] = action;
     return execute(actions, uint256(-1), minGet, referrer);
@@ -347,7 +370,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @param referrer The address that refers this trader. Only relevant on the first call.
   function closeLong(uint size, uint strike, uint maxPay, address referrer) public returns (uint, uint) {
     // Burn short token of USD/TOKEN pair
-    uint action = BurnShort | (getSlot(strike) << 2) | (size << 18);
+    uint action = BurnShort | (PerpLib.getSlot(strike) << 2) | (size << 18);
     uint[] memory actions = new uint[](1);
     actions[0] = action;
     return execute(actions, maxPay, 0, referrer);
@@ -361,7 +384,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @param referrer The address that refers this trader. Only relevant on the first call.
   function openShort(uint size, uint strike, uint maxPay, address referrer) public payable returns (uint, uint) {
     // Mint long token of USD/TOKEN pair
-    uint action = MintLong | (getSlot(strike) << 2) | (size << 18);
+    uint action = MintLong | (PerpLib.getSlot(strike) << 2) | (size << 18);
     uint[] memory actions = new uint[](1);
     actions[0] = action;
     return execute(actions, maxPay, 0, referrer);
@@ -374,7 +397,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @param referrer The address that refers this trader. Only relevant on the first call.
   function closeShort(uint size, uint strike, uint minGet, address referrer) public returns (uint, uint) {
     // Burn long token of USD/TOKEN pair
-    uint action = BurnLong | (getSlot(strike) << 2) | (size << 18);
+    uint action = BurnLong | (PerpLib.getSlot(strike) << 2) | (size << 18);
     uint[] memory actions = new uint[](1);
     actions[0] = action;
     return execute(actions, uint256(-1), minGet, referrer);
@@ -445,15 +468,15 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @param timeElapsed The number of seconds since last shift update.
   function _updateShift(uint timeElapsed) internal {
     uint target = oracle.getPrice();
-    console.log("oracle price", target);
-    console.log("mark price", mark);
+//    console.log("oracle price", target);
+//    console.log("mark price", mark);
     int change = 0;
     if (mark.fdiv(fundingAdjustThreshold) > target) {
       change = mark.mul(timeElapsed).toInt256().mul(-1).fmul(maxShiftChangePerSecond);
-      console.log("change0", (change.mul(-1)).toUint256());
+//      console.log("change0", (change.mul(-1)).toUint256());
     } else if (mark.fmul(fundingAdjustThreshold) < target) {
       change = mark.mul(timeElapsed).toInt256().fmul(maxShiftChangePerSecond);
-      console.log("change1", change.toUint256());
+//      console.log("change1", change.toUint256());
     } else {
 //      console.log("change2", change.toUint256());
       return; // nothing to do here
@@ -470,9 +493,9 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   function _moveSlots() internal {
     // Handle long side
     uint _prevMaxSafeLongSlot = maxSafeLongSlot;
-    uint _nextMaxSafeLongSlot     = getSlot(mark.fmul(safeThreshold));
+    uint _nextMaxSafeLongSlot = PerpLib.getSlot(mark.fmul(safeThreshold));
     while (_prevMaxSafeLongSlot > _nextMaxSafeLongSlot) {
-      uint strike = getStrike(_prevMaxSafeLongSlot);
+      uint strike = PerpLib.getStrike(_prevMaxSafeLongSlot);
       uint ident = getLongIdent(_prevMaxSafeLongSlot);
       uint size = supplyOf[ident];
       emit Liquidate(ident, size);
@@ -485,9 +508,9 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     // Handle short side
 //    console.log("before insurance", insurance.toUint256());
     uint _prevMinSafeShortSlot = minSafeShortSlot;
-    uint _nextMinSafeShortSlot = getSlot(mark.fdiv(safeThreshold)).add(1);
+    uint _nextMinSafeShortSlot = PerpLib.getSlot(mark.fdiv(safeThreshold)).add(1);
     while (_prevMinSafeShortSlot < _nextMinSafeShortSlot) {
-      uint strike = getStrike(_prevMinSafeShortSlot);
+      uint strike = PerpLib.getStrike(_prevMinSafeShortSlot);
       uint ident = getShortIdent(_prevMinSafeShortSlot);
       uint size = supplyOf[ident];
       emit Liquidate(ident, size);
@@ -516,11 +539,11 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
       uint limit = liquidationPerSec.mul(timeElapsed);
       uint buy = MathUpgradeable.min(prevBurden.mul(-1).toUint256(), limit);
       uint pay = _doBuy(buy);
-      console.log("limit", limit);
-      console.log("liquidation buy", buy);
-      console.log("liquidation pay", pay);
+//      console.log("limit", limit);
+//      console.log("liquidation buy", buy);
+//      console.log("liquidation pay", pay);
       insurance = insurance.sub(pay.toInt256());
-      console.log("after insurance", insurance.toUint256());
+//      console.log("after insurance", insurance.toUint256());
       burden = prevBurden.add(buy.toInt256());
     }
   }
@@ -529,13 +552,15 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @param ident The identifier of position tokens to mint.
   /// @param size The amount of position tokens to mint.
   function _doMint(uint ident, uint size) internal returns (uint) {
-    uint strike = getStrike(ident);
+    uint strike = PerpLib.getStrike(ident);
 //    console.log("do mint ident", ident);
     if (strike == 0) {
       IPika(pika).mint(msg.sender, size);
+//      console.log("minted pika", size);
       return 0;
     }
     uint supply = supplyOf[ident];
+//    console.log("strike", strike);
     uint value = strike.fmul(supply.add(size)).sub(strike.fmul(supply));
     supplyOf[ident] = supply.add(size);
     _mint(msg.sender, ident, size, '');
@@ -546,12 +571,13 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @param ident The identifier of position tokens to burn.
   /// @param size The amount of position tokens to burn.
   function _doBurn(uint ident, uint size) internal returns (uint) {
-    uint strike = getStrike(ident);
+    uint strike = PerpLib.getStrike(ident);
     if (strike == 0) {
       IPika(pika).burn(msg.sender, size);
       return 0;
     }
     uint supply = supplyOf[ident];
+    console.log("burn", size);
     uint value = strike.fmul(supply.add(size)).sub(strike.fmul(supply));
     supplyOf[ident] = supply.sub(size);
     _burn(msg.sender, ident, size);
@@ -581,7 +607,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     uint nextReserve = reserve.add(size);
     uint base = coeff.div(reserve).sub(coeff.div(nextReserve));
     int premium = shift.fmul(nextReserve).sub(shift.fmul(reserve));
-    console.log("nextReserve", nextReserve);
+//    console.log("nextReserve", nextReserve);
 //    console.log("doSell premium", premium.toUint256());
     reserve = nextReserve;
     return base.toInt256().add(premium).toUint256();
@@ -603,37 +629,12 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     return (shortOffsetOf[slot] << 16) | slot;
   }
 
-  /// @dev Convert the given strike price to its slot, round down.
-  /// @param strike The strike price to convert.
-  function getSlot(uint strike) public pure returns (uint) {
-    if (strike < 100) return strike + 800;
-    uint magnitude = 1;
-    while (strike >= 1000) {
-      magnitude++;
-      strike /= 10;
-    }
-    return 900 * magnitude + strike - 100;
-  }
-
-  /// @dev Convert the given slot identifier to strike price.
-  /// @param ident The slot identifier, can be with or without the offset.
-  function getStrike(uint ident) public pure returns (uint) {
-    uint slot = ident & ((1 << 16) - 1); // only consider the last 16 bits
-    uint prefix = slot % 900; // maximum value is 899
-    uint magnitude = slot / 900; // maximum value is 72
-    if (magnitude == 0) {
-      require(prefix >= 800, 'bad prefix');
-      return prefix - 800;
-    } else {
-      return (100 + prefix) * (10**(magnitude - 1)); // never overflow
-    }
-  }
   /// @dev Return the current user position of leveraged token for a strike.
   /// @param account Address of a user.
   /// @param strike The price which the leverage token is worth 0.
   /// @param isLong Whether is long or short in terms of TOKEN/USD pair.
   function getPosition(address account, uint strike, bool isLong) public view returns (uint) {
-      uint slot = getSlot(strike);
+      uint slot = PerpLib.getSlot(strike);
       uint ident = isLong ? getShortIdent(slot) : getLongIdent(slot);
       return balanceOf(account, ident);
   }
@@ -662,6 +663,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     uint latestMark = getLatestMark();
 //    console.log("latestMark", latestMark);
     if (isLong) {
+      console.log("strike", latestMark.fdiv(leverage));
       return latestMark.add(latestMark.fdiv(leverage));
     }
     return latestMark.sub(latestMark.fdiv(leverage));
@@ -682,7 +684,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
       timeElapsed = timeElapsed >> 1;
     }
     uint prev = total.fmul(mark);
-    console.log("spot price", getSpotPx());
+//    console.log("spot price", getSpotPx());
     uint next = uint(1e18).sub(total).fmul(getSpotPx());
     return prev.add(next);
   }
@@ -711,6 +713,8 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     uint nextReserve = nextReserve0.add(reserve).sub(reserve0);
     int prevVal = coeff.div(reserve).toInt256().sub(coeff.div(reserve0).toInt256());
     int nextVal = nextCoeff.div(nextReserve).toInt256().sub(nextCoeff.div(nextReserve0).toInt256());
+    console.log("prevVal", prevVal.mul(-1).toUint256());
+    console.log("nextVal", nextVal.mul(-1).toUint256());
     insurance = insurance.add(prevVal).sub(nextVal);
     coeff = nextCoeff;
     reserve0 = nextReserve0;
