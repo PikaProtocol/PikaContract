@@ -2,8 +2,6 @@
 
 pragma solidity 0.6.12;
 
-import "hardhat/console.sol";
-
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
@@ -26,7 +24,7 @@ import '../oracle/IOracle.sol';
 
 /*
  * @dev A market for inverse perpetual swap and PIKA stablecoin.
-    This is partially adapted from Alpha Finance's linear perpetual swap with two key differences:
+    This is partially adapted from Alpha Finance's linear perpetual swap with many differences. Below are the 3 key differences:
     1. This market is for inverse perpetual swap.
     (For reference: https://www.bitmex.com/app/inversePerpetualsGuide)
     An inverse perpetual contract is quoted in USD but margined and settled in the base token(e.g., ETH).
@@ -35,7 +33,9 @@ import '../oracle/IOracle.sol';
     Please note that a long position of TOKEN/USD inverse contract can be viewed as a short position of USD/TOKEN contract.
     All the long and short terms in all the public functions refer to TOKEN/USD pair, while the long and short terms of non-public functions
     refer to USD/TOKEN pair.
-    2. PIKA Token is minted when opening a 1x short position and burned when closing the position.
+    2. PIKA Token is minted when opening a 1x short position and burned when closing the position. Part of trading fee is
+    distributed to PIKA holders.
+    3. Liquidity is updated dynamically based on open interest change and trading volume change.
  */
 contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeable, IPikaPerp {
   using PerpMath for uint;
@@ -672,9 +672,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @param isLong Whether is long or short in terms of TOKEN/USD pair.
   function getStrikeFromLeverage(uint256 leverage, bool isLong) public view returns(uint) {
     uint latestMark = getLatestMark();
-//    console.log("latestMark", latestMark);
     if (isLong) {
-//      console.log("strike", latestMark.fdiv(leverage));
       return latestMark.add(latestMark.fdiv(leverage));
     }
     return latestMark.sub(latestMark.fdiv(leverage));
@@ -683,7 +681,6 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @dev Get the mark price, computed as average spot prices with decay.
   /// @param timeElapsed The number of seconds since last mark price update.
   function getMark(uint timeElapsed) public view returns (uint) {
-//    console.log("timeElapsed", timeElapsed);
     uint total = 1e18;
     uint each = decayPerSecond;
     while (timeElapsed > 0) {
@@ -694,7 +691,6 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
       timeElapsed = timeElapsed >> 1;
     }
     uint prev = total.fmul(mark);
-//    console.log("spot price", getSpotPx());
     uint next = uint(1e18).sub(total).fmul(getSpotPx());
     return prev.add(next);
   }
