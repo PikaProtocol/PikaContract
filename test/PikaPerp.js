@@ -132,8 +132,6 @@ describe("PikaPerp", function () {
       const expectedEthPaid = expectedPay.sub(expectedGet)
       const currentEthBalance = await provider.getBalance(this.alice.address)
       const ethPaid = (initialEthBalance - currentEthBalance).toString()
-      console.log("expected eth paid", expectedEthPaid.toString())
-      console.log("eth paid", ethPaid)
       assertAlmostEqual(ethPaid, expectedEthPaid)
       // check leverage token balance
       const ident = await this.pikaPerp.getShortIdent(getSlot(strike));
@@ -223,8 +221,6 @@ describe("PikaPerp", function () {
       const initialAliceBalance = await provider.getBalance(this.alice.address);
       const initialReserve = await this.pikaPerp.reserve();
       const initialCoeff = await this.pikaPerp.coeff();
-      console.log("reserve", initialReserve.toString())
-      console.log("coeff", initialCoeff.toString())
       const maxPay = "600000000000000000" // 0.5 eth
       await this.pikaPerp.closeLong(size, strike, maxPay, this.referrer.address, {
         from: this.alice.address,
@@ -235,9 +231,7 @@ describe("PikaPerp", function () {
       const expectedGet = BigNumber.from("600000000000000000")  // 0.6 eth = 1/1667 * 1000
       const expectedPay = BigNumber.from("501199880000000000") // 0.50119988 eth = (5e10 / (1.0001e7 - 1000) - 5e10 / (1.0001e7)) * (1 + TRADING_FEE)
       const expectedEthGet = expectedGet.sub(expectedPay)
-      console.log("expect get", expectedEthGet.toString())
       const currentAliceBalance = await provider.getBalance(this.alice.address);
-      console.log("sub", (currentAliceBalance.sub(initialAliceBalance)).toString())
       assertAlmostEqual(currentAliceBalance.sub(initialAliceBalance), expectedEthGet);
       // check spot price is the same as the price before the long
       expect(await this.pikaPerp.getSpotPx()).to.equal("500000000000000");
@@ -366,8 +360,6 @@ describe("PikaPerp", function () {
       const firstExpectedGet = BigNumber.from("997300539900000000") // 0.9973005399 eth = (5e10 / (1.0001e7 - 2000) - 5e10 / (1.0001e7)) * (1 + TRADING_FEE)
       const firstExpectedEthPaid = firstExpectedPay.sub(firstExpectedGet)
       const firstEthPaid = (firstInitialEthBalance - await provider.getBalance(this.alice.address)).toString()
-      console.log("ethpaid", firstEthPaid.toString())
-      console.log("expected paid", firstExpectedEthPaid.toString())
       assertAlmostEqual(firstEthPaid, firstExpectedEthPaid, 100)
       // check leverage token balance
       const firstLongIdent1 = await this.pikaPerp.getShortIdent(parseInt(getSlot(firstLongStrike1)))
@@ -376,16 +368,13 @@ describe("PikaPerp", function () {
       expect(await this.pikaPerp.balanceOf(this.alice.address, firstLongIdent2)).to.equal(size);
       // check protocol eth balance
       const protocolBalance = await provider.getBalance(this.pikaPerp.address);
-      console.log(protocolBalance.toString())
       assertAlmostEqual(protocolBalance, firstExpectedEthPaid, 100);
       // check new spot price equals original price, since long and short amounts are equal.
       const newSpot = await this.pikaPerp.getSpotPx();
       assertAlmostEqual(newSpot, 4.9980006E14) // 5e10 / ((1e7 + 2000)*(1e7 + 2000)) = 0.00049980006
-      console.log("2nd test")
       // 2. Execute a combination of two MintShorts for different strikes, two CloseLongs for previous two strikes
       const secondShortStrike1 = await this.pikaPerp.getStrikeFromLeverage("5000000000000000000", false);  // the strike for 5x short is 2500
       const secondShortStrike2 = await this.pikaPerp.getStrikeFromLeverage("3000000000000000000", false);  // the strike for 3x short is 3000
-      console.log(secondShortStrike1.toString(), secondShortStrike2.toString())
       const secondShortAction1 = 0n | (BigInt(parseInt(getSlot(secondShortStrike1))) << 2n) | (BigInt(size) << 18n);
       const secondShortAction2 = 0n | (BigInt(parseInt(getSlot(secondShortStrike2))) << 2n) | (BigInt(size) << 18n);
       const closeLongAction1 = 3n | (BigInt(parseInt(getSlot(firstLongStrike1))) << 2n) | (BigInt(size) << 18n);
@@ -407,8 +396,6 @@ describe("PikaPerp", function () {
       expect(await this.pikaPerp.balanceOf(this.alice.address, firstLongIdent1)).to.equal(0);
       expect(await this.pikaPerp.balanceOf(this.alice.address, firstLongIdent2)).to.equal(0);
       // check protocol eth balance
-      console.log((await provider.getBalance(this.pikaPerp.address)).toString())
-      console.log(secondExpectedEthPaid.add(firstExpectedEthPaid).toString())
       assertAlmostEqual(await provider.getBalance(this.pikaPerp.address), secondExpectedEthPaid.add(firstExpectedEthPaid), 100);
     })
 
@@ -427,7 +414,6 @@ describe("PikaPerp", function () {
       // Execute MintLong and MintShort separately, and then execute a combination of CloseLong and CloseShort for the previous strike
       const secondLongStrike = await this.pikaPerp.getStrikeFromLeverage("3000000000000000000", true);  // the strike for 5x long is 1500
       const secondShortStrike = await this.pikaPerp.getStrikeFromLeverage("3000000000000000000", false);  // the strike for 5x short is 3000
-      console.log(secondLongStrike.toString(), secondShortStrike.toString())
       const longAction = 2n | (BigInt(parseInt(getSlot(secondLongStrike))) << 2n) | (BigInt(size) << 18n);
       const shortAction = 0n | (BigInt(parseInt(getSlot(secondShortStrike))) << 2n) | (BigInt(size) << 18n);
       await expect(this.pikaPerp.execute([longAction], "2500000000000000000", "0", referrer, {from: this.alice.address, value: "1000000000000000000", gasPrice: "0"})) // 1eth
@@ -444,8 +430,9 @@ describe("PikaPerp", function () {
       // openLong
       const longSize = "1000000000000000000000" // 1000 usd
       const minGet = "300000000000000000" // 0.3 eth
-      const longStrike = parseInt(await this.pikaPerp.getStrikeFromLeverage("13000000000000000000", true));  // the strike for 13x long is 1857. Max leverage is 0.93/0.07 = 13.28
-      const liquidationPrice = parseInt(longStrike * SAFE_THRESHOLD) // 1/1997 = "500769230769230"
+      const longStrike = await this.pikaPerp.getStrikeFromLeverage("13000000000000000000", true);  // the strike for 13x long is 1857. Max leverage is 0.93/0.07 = 13.28
+      const safeThreshold = await this.pikaPerp.safeThreshold();
+      const liquidationPrice = longStrike.mul(safeThreshold).div("1000000000000000000") // 1/1997 = "500769230769230"
       await this.pikaPerp.openLong(longSize, longStrike, minGet, this.referrer.address, {
         from: this.alice.address,
         value: "1000000000000000000",
@@ -454,7 +441,6 @@ describe("PikaPerp", function () {
       const slot = parseInt(getSlot(longStrike));
       const ident = await this.pikaPerp.getShortIdent(slot);
       expect(await this.pikaPerp.balanceOf(this.alice.address, ident)).to.equal(longSize);
-      console.log("mark1", (await this.pikaPerp.mark()).toString())
       // test the long position has been liquidated
       const shortSize = "10000000000000000000000" // 10000 usd
       const maxPay = "6000000000000000000" // 6 eth
@@ -480,11 +466,14 @@ describe("PikaPerp", function () {
       // openLong
       const longSize = "1000000000000000000000" // 1000 usd
       const minGet = "300000000000000000" // 0.3 eth
-      const longStrike = parseInt(await this.pikaPerp.getStrikeFromLeverage("13000000000000000000", true));  // the strike for 13x long is 1857. Max leverage is 0.93/0.07 = 13.28
-      const liquidationPrice = parseInt(longStrike * SAFE_THRESHOLD) // 1/1997 = "500769230769230"
+      const longStrike = await this.pikaPerp.getStrikeFromLeverage("13000000000000000000", true);  // the strike for 13x long is 1857. Max leverage is 0.93/0.07 = 13.28
+      const safeThreshold = await this.pikaPerp.safeThreshold();
+      const liquidationPrice = longStrike.mul(safeThreshold).div("1000000000000000000") // 1/1997 = "500769230769230"
       const liquidationPerSecond = "100000000000000000"
       // Set liquidationPerSecond to a very small number
-      this.pikaPerp.setLiquidationPerSec(liquidationPerSecond); // 0.1 usd per second
+      const decayPerSecond = await this.pikaPerp.decayPerSecond();
+      const maxShiftChangePerSecond = await this.pikaPerp.maxShiftChangePerSecond();
+      this.pikaPerp.setParametersPerSec(liquidationPerSecond, decayPerSecond, maxShiftChangePerSecond); // 0.1 usd per second
       await this.pikaPerp.openLong(longSize, longStrike, minGet, this.referrer.address, {
         from: this.alice.address,
         value: "1000000000000000000",
@@ -493,7 +482,6 @@ describe("PikaPerp", function () {
       const slot = parseInt(getSlot(longStrike));
       const ident = await this.pikaPerp.getShortIdent(slot);
       expect(await this.pikaPerp.balanceOf(this.alice.address, ident)).to.equal(longSize);
-      console.log("mark1", (await this.pikaPerp.mark()).toString())
       // test the long position has been liquidated
       const shortSize = "10000000000000000000000" // 10000 usd
       const maxPay = "6000000000000000000" // 6 eth
@@ -524,7 +512,8 @@ describe("PikaPerp", function () {
       const shortSize = "1000000000000000000000" // 1000 usd
       const maxPay = "600000000000000000" // 0.6 eth
       const shortStrike = await this.pikaPerp.getStrikeFromLeverage("13000000000000000000", false);  // the strike for 13x short is 2167
-      const liquidationPrice = parseInt(shortStrike / SAFE_THRESHOLD) // 1/2015 = "496277915632754"
+      const safeThreshold = await this.pikaPerp.safeThreshold();
+      const liquidationPrice = shortStrike.mul("10000000000000000000").div(safeThreshold) // 1/2015 = "496277915632754"
       await this.pikaPerp.openShort(shortSize, shortStrike, maxPay, this.referrer.address, {
         from: this.alice.address,
         value: "1000000000000000000",
@@ -558,10 +547,13 @@ describe("PikaPerp", function () {
       const shortSize = "1000000000000000000000" // 1000 usd
       const maxPay = "600000000000000000" // 0.6 eth
       const shortStrike = await this.pikaPerp.getStrikeFromLeverage("13000000000000000000", false);  // the strike for 13x short is 2167
-      const liquidationPrice = parseInt(shortStrike / SAFE_THRESHOLD) // 1/2015 = "496277915632754"
+      const safeThreshold = await this.pikaPerp.safeThreshold();
+      const liquidationPrice = shortStrike.mul("10000000000000000000").div(safeThreshold) // 1/2015 = "496277915632754"
       const liquidationPerSecond = "100000000000000000"
       // Set liquidationPerSecond to a very small number
-      this.pikaPerp.setLiquidationPerSec(liquidationPerSecond); // 0.1 usd per second
+      const decayPerSecond = await this.pikaPerp.decayPerSecond();
+      const maxShiftChangePerSecond = await this.pikaPerp.maxShiftChangePerSecond();
+      this.pikaPerp.setParametersPerSec(liquidationPerSecond, decayPerSecond, maxShiftChangePerSecond); // 0.1 usd per second
       await this.pikaPerp.openShort(shortSize, shortStrike, maxPay, this.referrer.address, {
         from: this.alice.address,
         value: "1000000000000000000",
@@ -646,7 +638,6 @@ describe("PikaPerp", function () {
       // verity eth paid
       const shift = await this.pikaPerp.shift()
       const expectedShift = maxShiftChangePerSecond.mul(3600).mul(mark).mul(-1).div("1000000000000000000")
-      console.log(shift.toString(), expectedShift.toString())
       assertAlmostEqual(expectedShift, shift, 1000)
       const expectedPay = BigNumber.from("600000000000000000")  // 0.6 eth = 1/1667 * 1000
       const expectedGet = BigNumber.from("498492317500000000") // 0.4984923175 eth = (5e3 - 5e10 / (1e7 + 1000) + (shift * 1000)) * (1 - TRADING_FEE)
@@ -769,8 +760,6 @@ describe("PikaPerp", function () {
       const reserve0 = await this.pikaPerp.reserve0()
       const reserve = await this.pikaPerp.reserve()
       const insurance = await this.pikaPerp.insurance()
-      console.log(reserve0.toString(), reserve.toString())
-      console.log("newSpot", newSpot.toString())
       assertAlmostEqual(newSpot, 4.901480247E14) // 5e10 / ((1e7 + 100000)*(1e7 + 100000)) = 0.0004901480247
       // set liquidity 10% higher
       const nextCoeff = coeff.add(coeff.div(10))
@@ -804,8 +793,6 @@ describe("PikaPerp", function () {
       const reserve0 = await this.pikaPerp.reserve0()
       const reserve = await this.pikaPerp.reserve()
       const insurance = await this.pikaPerp.insurance()
-      console.log(reserve0.toString(), reserve.toString())
-      console.log("newSpot", newSpot.toString())
       assertAlmostEqual(newSpot, 4.901480247E14) // 5e10 / ((1e7 + 100000)*(1e7 + 100000)) = 0.0004901480247
       // set liquidity 10% lower
       const nextCoeff = coeff.sub(coeff.div(10))
@@ -818,7 +805,6 @@ describe("PikaPerp", function () {
       const nextInsurance = await this.pikaPerp.insurance()
       const prevVal = coeff.div(reserve).sub(coeff.div(reserve0));
       const nextVal = nextCoeff.div(nextReserve).sub(nextCoeff.div(nextReserve0));
-      console.log("increase", nextVal - prevVal)
       // verify insurance increase by (prevVal - nextVal)
       assertAlmostEqual(nextInsurance.sub(insurance), prevVal.sub(nextVal))
       // verify the spot price is the same as before setting the liquidity
@@ -826,10 +812,12 @@ describe("PikaPerp", function () {
     })
   })
 
-  describe("test set liquidity dynamically", function () {
-    it("should setLiquidity higher", async function () {
-      await this.pikaPerp.setFundingAdjustThreshold("1250000000000000000"); // set threshold to a large number, to remove the funding effect while testing dynamic liquidity
-      await this.pikaPerp.setDynamicLiquidity(true);
+  describe("test set liquidity dynamically by open interest", function () {
+    it("should setLiquidity dynamically when open interest increase and decrease", async function () {
+      const safeThreshold = await this.pikaPerp.safeThreshold();
+      const newSpotMarkThreshold = await this.pikaPerp.spotMarkThreshold();
+      await this.pikaPerp.setThresholds("1250000000000000000", safeThreshold, newSpotMarkThreshold); // set threshold to a large number, to remove the funding effect while testing dynamic liquidity
+      await this.pikaPerp.setDynamicLiquidity(true, false);
       // 1. Test liquidity is dynamically increased when open interest increases.
       const size = "100000000000000000000000" // 100000 usd
       const minGet = "30000000000000000000" // 30 eth
@@ -847,14 +835,16 @@ describe("PikaPerp", function () {
       const smallDecayTwapOI = await this.pikaPerp.smallDecayTwapOI()
       const largeDecayTwapOI = await this.pikaPerp.largeDecayTwapOI()
       expect(smallDecayTwapOI).to.be.equal(largeDecayTwapOI)
-      expect(totalOI).to.be.equal(totalOI)
+      expect(totalOI).to.be.equal("100000000000000000000000")
       assertAlmostEqual(spot, 4.901480247E14) // 5e10 / ((1e7 + 100000)*(1e7 + 100000)) = 0.0004901480247
-      await provider.send("evm_increaseTime", [7200])
+      // await provider.send("evm_increaseTime", [7200])
       await this.pikaPerp.openLong(size, strike, minGet, referrer, {
         from: this.alice.address,
         value: "100000000000000000000",
         gasPrice: "0"
       }) // 100eth
+      await provider.send("evm_increaseTime", [7200])
+      await this.pikaPerp.poke();
       const nextSpot = await this.pikaPerp.getSpotPx()
       const nextCoeff = await this.pikaPerp.coeff()
       const expectedSpot1 = 4.805843906E14  // 5e10 / ((1e7 + 200000)*(1e7 + 200000)) = 0.0004805843906
@@ -869,53 +859,79 @@ describe("PikaPerp", function () {
       const closeSize = "200000000000000000000000" // 100000 usd
       const expectedSpot2 =  4.999916662E14 // 5.0041695601851585e10 / ((1.0204252065111530195326154e7 - 200000)*(1.0204252065111530195326154e7 - 200000)) = 0.0004999916662
       const expectedCoeffChange2 = liquidityChangePerSec.mul(nextCoeff).mul(18000).div("1000000000000000000")
-      await provider.send("evm_increaseTime", [18000]) // 5 hours
       await this.pikaPerp.closeLong(closeSize, strike, maxPay, referrer, {
         from: this.alice.address,
         gasPrice: "0"
       })
+      await provider.send("evm_increaseTime", [18000]) // 5 hours
+      await this.pikaPerp.poke();
       assertAlmostEqual(await this.pikaPerp.getSpotPx(), expectedSpot2)
       assertAlmostEqual(nextCoeff.sub(await this.pikaPerp.coeff()), expectedCoeffChange2, 100)
       expect(await this.pikaPerp.totalOI()).to.be.equal("0")
       expect(await this.pikaPerp.largeDecayTwapOI()).to.be.gt(await this.pikaPerp.smallDecayTwapOI())
     })
+  })
 
-    it("should setLiquidity lower", async function () {
-      const size = "100000000000000000000000" // 100000 usd
-      const minGet = "30000000000000000000" // 30 eth
+  describe("test set liquidity dynamically by trading volume", function () {
+    it("should setLiquidity dynamically when trading volume increases and decreases", async function () {
+      const safeThreshold = await this.pikaPerp.safeThreshold();
+      const newSpotMarkThreshold = await this.pikaPerp.spotMarkThreshold();
+      await this.pikaPerp.setThresholds("1250000000000000000", safeThreshold, newSpotMarkThreshold); // set threshold to a large number, to remove the funding effect while testing dynamic liquidity
+      await this.pikaPerp.setDynamicLiquidity(false, true);
+      // 1. Test liquidity is dynamically increased when trading volume increases.
       const strike = await this.pikaPerp.getStrikeFromLeverage("5000000000000000000", true);  // the strike for 5x long is 1667
       const referrer = this.referrer.address
-      await this.pikaPerp.openLong(size, strike, minGet, referrer, {
+      await this.pikaPerp.openLong("100000000000000000000000", strike, "30000000000000000000" , referrer, {
         from: this.alice.address,
         value: "100000000000000000000",
         gasPrice: "0"
       }) // 100eth
-      const newSpot = await this.pikaPerp.getSpotPx()
+      const liquidityChangePerSec = await this.pikaPerp.liquidityChangePerSec()
+      const spot = await this.pikaPerp.getSpotPx()
       const coeff = await this.pikaPerp.coeff()
-      const reserve0 = await this.pikaPerp.reserve0()
-      const reserve = await this.pikaPerp.reserve()
-      const insurance = await this.pikaPerp.insurance()
-      console.log(reserve0.toString(), reserve.toString())
-      console.log("newSpot", newSpot.toString())
-      assertAlmostEqual(newSpot, 4.901480247E14) // 5e10 / ((1e7 + 100000)*(1e7 + 100000)) = 0.0004901480247
-      // set liquidity 10% lower
-      const nextCoeff = coeff.sub(coeff.div(10))
-      const nextReserve = BigNumber.from((Math.sqrt(Number(nextCoeff.div(newSpot)))).toString()).mul(1e9);
-      const nextReserve0 = nextReserve.add(reserve0).sub(reserve);
-      await this.pikaPerp.setLiquidity(nextCoeff, nextReserve0)
-      expect(await this.pikaPerp.coeff()).to.equal(nextCoeff)
-      expect(await this.pikaPerp.reserve()).to.equal(nextReserve)
-      expect(await this.pikaPerp.reserve0()).to.equal(nextReserve0)
-      const nextInsurance = await this.pikaPerp.insurance()
-      const prevVal = coeff.div(reserve).sub(coeff.div(reserve0));
-      const nextVal = nextCoeff.div(nextReserve).sub(nextCoeff.div(nextReserve0));
-      console.log("increase", nextVal - prevVal)
-      // verify insurance increase by (prevVal - nextVal)
-      assertAlmostEqual(nextInsurance.sub(insurance), prevVal.sub(nextVal))
-      // verify the spot price is the same as before setting the liquidity
-      assertAlmostEqual(await this.pikaPerp.getSpotPx(), newSpot);
+      const dailyVolume = await this.pikaPerp.dailyVolume()
+      expect(dailyVolume).to.be.equal("100000000000000000000000")
+      assertAlmostEqual(spot, 4.901480247E14) // 5e10 / ((1e7 + 100000)*(1e7 + 100000)) = 0.0004901480247
+      await provider.send("evm_increaseTime", [86401])
+      await this.pikaPerp.openLong("200000000000000000000000", strike, "60000000000000000000", referrer, {
+        from: this.alice.address,
+        value: "200000000000000000000",
+        gasPrice: "0"
+      }) // 100eth
+      // await this.pikaPerp.poke();
+      expect(await this.pikaPerp.dailyVolume()).to.be.equal("200000000000000000000000")
+      expect(await this.pikaPerp.prevDailyVolume()).to.be.equal("100000000000000000000000")
+      const nextSpot = await this.pikaPerp.getSpotPx()
+      const expectedSpot1 = 4.712979546E14  // 5e10 / ((1e7 + 300000)*(1e7 + 300000)) = 0.0004712979546
+      assertAlmostEqual(nextSpot, expectedSpot1)
+      await provider.send("evm_increaseTime", [86401])
+      await this.pikaPerp.poke();
+
+      const nextCoeff = await this.pikaPerp.coeff()
+      const expectedCoeffChange1 = liquidityChangePerSec.mul(coeff).mul(86401).div("1000000000000000000")
+      assertAlmostEqual(nextSpot, expectedSpot1)
+      assertAlmostEqual(nextCoeff.sub(coeff), expectedCoeffChange1, 1000)
+      expect(await this.pikaPerp.dailyVolume()).to.be.equal("0")
+      expect(await this.pikaPerp.prevDailyVolume()).to.be.equal("200000000000000000000000")
+
+      // 2. Test liquidity is dynamically decreased when open trading volume decreases.
+      const maxPay = "150000000000000000000" // 30 eth
+      const closeSize = "100000000000000000000000" // 100000 usd
+      await this.pikaPerp.closeLong(closeSize, strike, maxPay, referrer, {
+        from: this.alice.address,
+        gasPrice: "0"
+      })
+      await provider.send("evm_increaseTime", [86401]) // 24 hours
+      await this.pikaPerp.poke();
+      const expectedSpot2 =  4.805376273E14 // 5.0500011574070874e10 / ((1.0351373075967440046335431e7 - 100000)*(1.0351373075967440046335431e7 - 100000)) = 0.0004805376273
+      const expectedCoeffChange2 = liquidityChangePerSec.mul(nextCoeff).mul(86401).div("1000000000000000000")
+      assertAlmostEqual(await this.pikaPerp.getSpotPx(), expectedSpot2, 10000)
+      assertAlmostEqual(nextCoeff.sub(await this.pikaPerp.coeff()), expectedCoeffChange2, 1000)
+      expect(await this.pikaPerp.dailyVolume()).to.be.equal("0")
+      expect(await this.pikaPerp.prevDailyVolume()).to.be.equal("100000000000000000000000")
     })
   })
+
 
 
   // describe("call setter and getter method", async function () {
