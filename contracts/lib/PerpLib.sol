@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.6.12;
+import "hardhat/console.sol";
+
+import '@openzeppelin/contracts-upgradeable/math/SafeMathUpgradeable.sol';
+import '../lib/PerpMath.sol';
 
 library PerpLib {
+	using PerpMath for uint;
+	using PerpMath for int;
+	using SafeMathUpgradeable for uint;
 
 	/// @dev Convert the given strike price to its slot, round down.
 	/// @param strike The strike price to convert.
@@ -27,5 +34,26 @@ library PerpLib {
 		} else {
 			return (100 + prefix) * (10**(magnitude - 1)); // never overflow
 		}
+	}
+
+	/// @dev Get the total open interest, computed as average open interest with decay.
+	/// @param timeElapsed The number of seconds since last open interest update.
+	function getTwapOI(uint timeElapsed, uint prevDecayTwapOI, uint oiDecayPerSecond, uint currentOI) internal view returns (uint) {
+		uint total = 1e18;
+		console.log("timeElapsed", timeElapsed);
+		console.log("oiDecayPerSecond", oiDecayPerSecond);
+		uint each = oiDecayPerSecond;
+		while (timeElapsed > 0) {
+			if (timeElapsed & 1 != 0) {
+				total = total.fmul(each);
+			}
+			each = each.fmul(each);
+			timeElapsed = timeElapsed >> 1;
+		}
+		uint prev = total.fmul(prevDecayTwapOI);
+		console.log("total", total);
+		uint next = uint(1e18).sub(total).fmul(currentOI);
+		console.log("next", next);
+		return prev.add(next);
 	}
 }

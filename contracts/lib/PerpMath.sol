@@ -25,4 +25,13 @@ library PerpMath {
 	function fdiv(int lhs, uint rhs) internal pure returns (int) {
 		return lhs.mul(1e18) / rhs.toInt256();
 	}
+
+	function sqrt(uint x) internal pure returns  (uint y) {
+		uint z = (x + 1) / 2;
+		y = x;
+		while (z < y) {
+			y = z;
+			z = (x / z + z) / 2;
+		}
+	}
 }
