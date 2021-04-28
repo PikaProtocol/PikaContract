@@ -47,6 +47,7 @@ contract Pika is IPika, ERC20, AccessControl {
     }
 
     constructor(uint256 chainId) ERC20(NAME, SYMBOL) public {
+        console.log(msg.sender);
         DOMAIN_SEPARATOR = keccak256(abi.encode(
                 EIP712_DOMAIN,
                 keccak256(bytes(NAME)),
@@ -64,7 +65,6 @@ contract Pika is IPika, ERC20, AccessControl {
 
     function burn(address from, uint256 amount) public override {
         require(hasRole(BURNER_ROLE, msg.sender), "Caller is not a burner");
-        console.log("burn", msg.sender);
         _burn(from, amount);
     }
 
@@ -104,12 +104,14 @@ contract Pika is IPika, ERC20, AccessControl {
 
     function addToNoRewardAccounts(address account) external onlyGovernor {
         require(!noRewardAccounts[account], "PIKA: _address is already a no-reward address");
+        _updateRewards(account);
         noRewardAccounts[account] = true;
         noRewardSupply = noRewardSupply.add(balanceOf(account));
     }
 
     function removeFromNoRewardAccounts(address account) external onlyGovernor {
         require(noRewardAccounts[account], "PIKA: _address is already a reward address");
+        _updateRewards(account);
         noRewardAccounts[account] = false;
         noRewardSupply = noRewardSupply.sub(balanceOf(account));
     }

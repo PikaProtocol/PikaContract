@@ -746,10 +746,12 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   }
 
   // @dev setters for thresholds parameters. Combine the setters to one function to reduce contract size.
-  function setThresholds(uint newFundingAdjustThreshold, uint newSafeThreshold, uint newSpotMarkThreshold) external onlyGovernor {
+  function setThresholds(uint newFundingAdjustThreshold, uint newSafeThreshold, uint newSpotMarkThreshold, uint newOIChangeThreshold, uint newVolumeChangeThreshold) external onlyGovernor {
     fundingAdjustThreshold = newFundingAdjustThreshold;
     safeThreshold = newSafeThreshold;
     spotMarkThreshold = newSpotMarkThreshold;
+    OIChangeThreshold = newOIChangeThreshold;
+    volumeChangeThreshold = newVolumeChangeThreshold;
   }
 
   function setTradingFee(uint newTradingFee) external onlyGovernor {
