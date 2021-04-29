@@ -120,13 +120,13 @@ contract Pika is IPika, ERC20, AccessControl {
         rewardDistributors = newRewardDistributors;
     }
 
-    function recoverClaim(address account, address receiver) external onlyGovernor {
+    function recoverClaim(address account, address payable receiver) external onlyGovernor {
         for (uint256 i = 0; i < rewardDistributors.length; i++) {
             IRewardDistributor(rewardDistributors[i]).claimRewards(account, receiver);
         }
     }
 
-    function claimRewards(address receiver) external {
+    function claimRewards(address payable receiver) external {
         for (uint256 i = 0; i < rewardDistributors.length; i++) {
             address rewardDistributor = rewardDistributors[i];
             IRewardDistributor(rewardDistributor).claimRewards(msg.sender, receiver);

@@ -9,12 +9,14 @@ import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./IRewardDistributor.sol";
 import "./IPika.sol";
+import '../lib/UniERC20.sol';
 
 // code adapted from https://github.com/trusttoken/smart-contracts/blob/master/contracts/truefi/TrueFarm.sol
 // and https://raw.githubusercontent.com/xvi10/gambit-contracts/master/contracts/tokens/YieldTracker.sol
 contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
+    using UniERC20 for IERC20;
 
     uint256 constant PRECISION = 1e30;
 
@@ -51,28 +53,28 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
             return claimableReward[account];
         }
         uint256 totalSupplyWithReward = IPika(pikaToken).totalSupplyWithReward();
-        uint256 currentTotalReward = IERC20(rewardToken).balanceOf(address(this));
+        uint256 currentTotalReward = IERC20(rewardToken).uniBalanceOf(address(this));
         uint256 newReward = currentTotalReward.sub(previousTotalReward);
         uint256 nextCumulativeRewardPerToken = cumulativeRewardPerToken.add(newReward.div(totalSupplyWithReward));
         return claimableReward[account].add(
             balanceWithReward.mul(nextCumulativeRewardPerToken.sub(previousCumulatedRewardPerToken[account])).div(PRECISION));
     }
 
-    function claimRewards(address account, address receiver) external override returns (uint256) {
+    function claimRewards(address account, address payable receiver) external override returns (uint256) {
         require(msg.sender == pikaToken, "RewardDistributor: forbidden");
         updateRewards(account);
 
         uint256 tokenAmount = claimableReward[account];
         claimableReward[account] = 0;
 
-        IERC20(rewardToken).safeTransfer(receiver, tokenAmount);
+        IERC20(rewardToken).uniTransfer(receiver, tokenAmount);
         emit Claim(account, tokenAmount);
 
         return tokenAmount;
     }
 
     function updateRewards(address account) public override nonReentrant {
-        uint256 currentTotalReward = IERC20(rewardToken).balanceOf(address(this));
+        uint256 currentTotalReward = IERC20(rewardToken).uniBalanceOf(address(this));
         uint256 newReward = currentTotalReward.sub(previousTotalReward);
         previousTotalReward = currentTotalReward;
 
