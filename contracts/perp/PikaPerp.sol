@@ -585,13 +585,13 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     if (smallDecayTwapOI.fdiv(largeDecayTwapOI) > OIChangeThreshold) {
     // Since recent OI increased, increase liquidity.
       uint nextCoeff = coeff.add(change);
-      uint nextReserve = (nextCoeff.div(getSpotPx()).mul(1e18)).sqrt();
+      uint nextReserve = (nextCoeff.fdiv(getSpotPx())).sqrt();
       uint nextReserve0 = nextReserve.add(reserve0).sub(reserve);
       setLiquidity(nextCoeff, nextReserve0);
     } else if (largeDecayTwapOI.fdiv(smallDecayTwapOI) > OIChangeThreshold) {
       // Since recent OI decreased, decrease liquidity.
       uint nextCoeff = coeff.sub(change);
-      uint nextReserve = (nextCoeff.div(getSpotPx()).mul(1e18)).sqrt();
+      uint nextReserve = (nextCoeff.fdiv(getSpotPx())).sqrt();
       uint nextReserve0 = nextReserve.add(reserve0).sub(reserve);
       setLiquidity(nextCoeff, nextReserve0);
     }
@@ -606,12 +606,12 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     uint change = coeff.mul(now - lastDailyVolumeUpdateTime).fmul(liquidityChangePerSec);
     if (dailyVolume.fdiv(prevDailyVolume) > volumeChangeThreshold) {
       uint nextCoeff = coeff.add(change);
-      uint nextReserve = (nextCoeff.div(getSpotPx()).mul(1e18)).sqrt();
+      uint nextReserve = (nextCoeff.fdiv(getSpotPx())).sqrt();
       uint nextReserve0 = nextReserve.add(reserve0).sub(reserve);
       setLiquidity(nextCoeff, nextReserve0);
     } else if (prevDailyVolume.fdiv(dailyVolume) > volumeChangeThreshold) {
       uint nextCoeff = coeff.sub(change);
-      uint nextReserve = (nextCoeff.div(getSpotPx()).mul(1e18)).sqrt();
+      uint nextReserve = (nextCoeff.fdiv(getSpotPx())).sqrt();
       uint nextReserve0 = nextReserve.add(reserve0).sub(reserve);
       setLiquidity(nextCoeff, nextReserve0);
     }
@@ -619,7 +619,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
 
   // ============ Getter Functions ============
 
-  function getTradeAction(uint kind, uint size, uint strike) public view returns (uint[] memory){
+  function getTradeAction(uint kind, uint size, uint strike) public pure returns (uint[] memory){
     uint action = kind | (PerpLib.getSlot(strike) << 2) | (size << 18);
     uint[] memory actions = new uint[](1);
     actions[0] = action;
@@ -650,22 +650,11 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
       return balanceOf(account, ident);
   }
 
-
   /// @dev Return the current approximate spot price of this perp market.
   function getSpotPx() public view returns (uint) {
     uint px = coeff.div(reserve).fdiv(reserve);
     return px.toInt256().add(shift).toUint256();
   }
-
-//  /// @dev Get leverage number for a given strike price
-//  /// @param strike The price which leverage position will expire(gets liquidated).
-//  function getLeverageFromStrike(uint256 strike) public view returns(uint) {
-//    uint latestMark = getLatestMark();
-//    if (latestMark > strike ) {
-//      return latestMark.fdiv(latestMark - strike);
-//    }
-//    return latestMark.fdiv(strike - latestMark);
-//  }
 
   /// @dev Get strike price from target leverage
   /// @param leverage The leverage of the position.
