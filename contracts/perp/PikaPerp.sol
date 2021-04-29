@@ -84,12 +84,12 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   );
 
   event Collect(
-    address indexed referrer, // The user who collects the commission fee.
+    address payable indexed referrer, // The user who collects the commission fee.
     uint amount // The amount of tokens collected.
   );
 
   event RewardDistribute(
-    uint rewardDistributeTime, // The timestamp that reward is distributed.
+    address payable indexed rewardDistributor, // The distributor address to receive the trading fee reward.
     uint amount // The amount of tokens collected.
   );
 
@@ -165,7 +165,6 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   uint public lastDailyVolumeUpdateTime; // Last timestamp when the previous daily volume stops accumulating
   uint public lastTwapOIChangeTime; // Last timestamp when the twap open interest updates happened.
   uint public lastLiquidityChangeTime; // Last timestamp when the liquidity changes happened.
-  uint public lastRewardDistributeTime; // Last timestamp when the reward is distributed.
   uint public lastPoke; // Last timestamp when the poke action happened.
 //  uint public mark; // Mark price, as measured by exponential decay TWAP of spot prices.
   uint public override mark; // Mark price, as measured by exponential decay TWAP of spot prices.
@@ -192,8 +191,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     IOracle _oracle,
     uint _coeff,
     uint _reserve0,
-    uint _liquidationPerSec,
-    address payable _rewardDistributor
+    uint _liquidationPerSec
   ) public initializer {
     __ERC1155_init(uri);
     pika = _pika;
@@ -224,11 +222,9 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     lastDailyVolumeUpdateTime = now;
     lastTwapOIChangeTime = now;
     lastLiquidityChangeTime = now;
-    lastRewardDistributeTime = now;
     lastPoke = now;
     guardian = msg.sender;
     governor = msg.sender;
-    rewardDistributor = _rewardDistributor;
     uint spotPx = getSpotPx();
     mark = spotPx;
     uint slot = PerpLib.getSlot(spotPx);
@@ -320,7 +316,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     }
     require(pay <= maxPay, 'max pay constraint violation');
     require(get >= minGet, 'min get constraint violation');
-    // 3. Settle tokens with the executor and collect the trading fee. Distribute trading fee reward every hour to pika holders.
+    // 3. Settle tokens with the executor and collect the trading fee.
     if (pay > get) {
       token.uniTransferFromSenderToThis(pay - get);
     } else if (get > pay) {
@@ -328,12 +324,6 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     }
     uint reward = pikaRewardRatio.fmul(fee);
     pikaReward = pikaReward.add(reward);
-    if (now - lastRewardDistributeTime > 1 hours && pikaReward > 0) {
-      token.uniTransfer(rewardDistributor, pikaReward);
-      lastRewardDistributeTime = now;
-      emit RewardDistribute(lastRewardDistributeTime, pikaReward);
-      pikaReward = 0;
-    }
     address beneficiary = referrerOf[msg.sender];
     if (beneficiary == address(0)) {
       require(referrer != msg.sender, 'bad referrer');
@@ -360,7 +350,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @param strike The price which the leverage token is worth 0.
   /// @param minGet The minimum get value in TOKEN the caller is willing to take.
   /// @param referrer The address that refers this trader. Only relevant on the first call.
-  function openLong(uint size, uint strike, uint minGet, address referrer) public payable returns (uint, uint) {
+  function openLong(uint size, uint strike, uint minGet, address referrer) external payable returns (uint, uint) {
     // Mint short token of USD/TOKEN pair
     return execute(getTradeAction(MintShort, size, strike), uint256(-1), minGet, referrer);
   }
@@ -370,7 +360,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @param strike The price which the leverage token is worth 0.
   /// @param maxPay The maximum pay size in leveraged token the caller is willing to commit.
   /// @param referrer The address that refers this trader. Only relevant on the first call.
-  function closeLong(uint size, uint strike, uint maxPay, address referrer) public returns (uint, uint) {
+  function closeLong(uint size, uint strike, uint maxPay, address referrer) external returns (uint, uint) {
     // Burn short token of USD/TOKEN pair
     return execute(getTradeAction(BurnShort, size, strike), maxPay, 0, referrer);
   }
@@ -381,7 +371,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @param strike The price which the leverage token is worth 0.
   /// @param maxPay The maximum pay value in ETH the caller is willing to commit.
   /// @param referrer The address that refers this trader. Only relevant on the first call.
-  function openShort(uint size, uint strike, uint maxPay, address referrer) public payable returns (uint, uint) {
+  function openShort(uint size, uint strike, uint maxPay, address referrer) external payable returns (uint, uint) {
     // Mint long token of USD/TOKEN pair
     return execute(getTradeAction(MintLong, size, strike), maxPay, 0, referrer);
   }
@@ -391,14 +381,14 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @param strike The price which the leverage token is worth 0.
   /// @param minGet The minimum get value in TOKEN the caller is willing to take.
   /// @param referrer The address that refers this trader. Only relevant on the first call.
-  function closeShort(uint size, uint strike, uint minGet, address referrer) public returns (uint, uint) {
+  function closeShort(uint size, uint strike, uint minGet, address referrer) external returns (uint, uint) {
     // Burn long token of USD/TOKEN pair
     return execute(getTradeAction(BurnLong, size, strike), uint256(-1), minGet, referrer);
   }
 
   /// @dev Collect trading commission for the caller.
   /// @param amount The amount of commission to collect.
-  function collect(uint amount) public nonReentrant {
+  function collect(uint amount) external nonReentrant {
     commissionOf[msg.sender] = commissionOf[msg.sender].sub(amount);
     token.uniTransfer(msg.sender, amount);
     emit Collect(msg.sender, amount);
@@ -406,7 +396,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
 
   /// @dev Deposit more funds to the insurance pool.
   /// @param amount The amount of funds to deposit.
-  function deposit(uint amount) public nonReentrant {
+  function deposit(uint amount) external nonReentrant {
     token.uniTransferFromSenderToThis(amount);
     insurance = insurance.add(amount.toInt256());
     emit Deposit(msg.sender, amount);
@@ -414,7 +404,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
 
   /// @dev Withdraw some insurance funds. Can only be called by the guardian.
   /// @param amount The amount of funds to withdraw.
-  function withdraw(uint amount) public nonReentrant {
+  function withdraw(uint amount) external nonReentrant {
     require(msg.sender == guardian, 'not the guardian');
     insurance = insurance.sub(amount.toInt256());
     require(insurance > 0, 'negative insurance after withdrawal');
@@ -587,13 +577,13 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
       uint nextCoeff = coeff.add(change);
       uint nextReserve = (nextCoeff.fdiv(getSpotPx())).sqrt();
       uint nextReserve0 = nextReserve.add(reserve0).sub(reserve);
-      setLiquidity(nextCoeff, nextReserve0);
+      _setLiquidity(nextCoeff, nextReserve0);
     } else if (largeDecayTwapOI.fdiv(smallDecayTwapOI) > OIChangeThreshold) {
       // Since recent OI decreased, decrease liquidity.
       uint nextCoeff = coeff.sub(change);
       uint nextReserve = (nextCoeff.fdiv(getSpotPx())).sqrt();
       uint nextReserve0 = nextReserve.add(reserve0).sub(reserve);
-      setLiquidity(nextCoeff, nextReserve0);
+      _setLiquidity(nextCoeff, nextReserve0);
     }
     lastLiquidityChangeTime = now;
   }
@@ -608,12 +598,35 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
       uint nextCoeff = coeff.add(change);
       uint nextReserve = (nextCoeff.fdiv(getSpotPx())).sqrt();
       uint nextReserve0 = nextReserve.add(reserve0).sub(reserve);
-      setLiquidity(nextCoeff, nextReserve0);
+      _setLiquidity(nextCoeff, nextReserve0);
     } else if (prevDailyVolume.fdiv(dailyVolume) > volumeChangeThreshold) {
       uint nextCoeff = coeff.sub(change);
       uint nextReserve = (nextCoeff.fdiv(getSpotPx())).sqrt();
       uint nextReserve0 = nextReserve.add(reserve0).sub(reserve);
-      setLiquidity(nextCoeff, nextReserve0);
+      _setLiquidity(nextCoeff, nextReserve0);
+    }
+  }
+
+  /// @dev Update liquidity factors, using insurance fund to maintain invariants.
+  /// @param nextCoeff The new coeefficient value.
+  /// @param nextReserve0 The new reserve0 value.
+  function _setLiquidity(uint nextCoeff, uint nextReserve0) internal {
+    uint nextReserve = nextReserve0.add(reserve).sub(reserve0);
+    int prevVal = coeff.div(reserve).toInt256().sub(coeff.div(reserve0).toInt256());
+    int nextVal = nextCoeff.div(nextReserve).toInt256().sub(nextCoeff.div(nextReserve0).toInt256());
+    insurance = insurance.add(prevVal).sub(nextVal);
+    coeff = nextCoeff;
+    reserve0 = nextReserve0;
+    reserve = nextReserve;
+    emit LiquidityChanged(coeff, reserve0, reserve, nextCoeff, nextReserve0, nextReserve, prevVal.sub(nextVal));
+  }
+
+  function distributeReward() external override returns (uint256) {
+    require(msg.sender == rewardDistributor, "not the rewardDistributor");
+    if (pikaReward > 0) {
+      token.uniTransfer(rewardDistributor, pikaReward);
+      emit RewardDistribute(rewardDistributor, pikaReward);
+      pikaReward = 0;
     }
   }
 
@@ -693,39 +706,41 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     return mark;
   }
 
-  // ============ Setter Functions ============
+  /// @dev Get the reward that has not been distributed.
+  function getPendingReward() external override view returns (uint256) {
+    return pikaReward;
+  }
+
+
+// ============ Setter Functions ============
 
   /// @dev Set the address to become the next guardian.
   /// @param addr The address to become the guardian.
-  function setGuardian(address addr) public onlyGovernor {
+  function setGuardian(address addr) external onlyGovernor {
     guardian = addr;
   }
 
   /// @dev Set the address to become the next governor.
   /// @param addr The address to become the governor.
-  function setGovernor(address addr) public onlyGovernor {
+  function setGovernor(address addr) external onlyGovernor {
     governor = addr;
+  }
+
+  /// @dev Set the distributor address to receive the trading fee reward.
+  function setRewardDistributor(address payable newRewardDistributor) external onlyGovernor {
+    rewardDistributor = newRewardDistributor;
+  }
+
+  function setLiquidity(uint nextCoeff, uint nextReserve0) external onlyGovernor {
+    _setLiquidity(nextCoeff, nextReserve0);
   }
 
   /// @dev Set market status for this perpetual market.
   /// @param _status The new market status.
-  function setMarketStatus(MarketStatus _status) public onlyGovernor {
+  function setMarketStatus(MarketStatus _status) external onlyGovernor {
     status = _status;
   }
 
-  /// @dev Update liquidity factors, using insurance fund to maintain invariants.
-  /// @param nextCoeff The new coeefficient value.
-  /// @param nextReserve0 The new reserve0 value.
-  function setLiquidity(uint nextCoeff, uint nextReserve0) public onlyGovernor {
-    uint nextReserve = nextReserve0.add(reserve).sub(reserve0);
-    int prevVal = coeff.div(reserve).toInt256().sub(coeff.div(reserve0).toInt256());
-    int nextVal = nextCoeff.div(nextReserve).toInt256().sub(nextCoeff.div(nextReserve0).toInt256());
-    insurance = insurance.add(prevVal).sub(nextVal);
-    coeff = nextCoeff;
-    reserve0 = nextReserve0;
-    reserve = nextReserve;
-    emit LiquidityChanged(coeff, reserve0, reserve, nextCoeff, nextReserve0, nextReserve, prevVal.sub(nextVal));
-  }
 
   // @dev setters for per second parameters. Combine the setters to one function to reduce contract size.
   function setParametersPerSec(uint nextLiquidationPerSec, uint newDecayPerSecond, uint newMaxShiftChangePerSecond) external onlyGovernor {

@@ -47,7 +47,6 @@ contract Pika is IPika, ERC20, AccessControl {
     }
 
     constructor(uint256 chainId) ERC20(NAME, SYMBOL) public {
-        console.log(msg.sender);
         DOMAIN_SEPARATOR = keccak256(abi.encode(
                 EIP712_DOMAIN,
                 keccak256(bytes(NAME)),

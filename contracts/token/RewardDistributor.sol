@@ -9,7 +9,9 @@ import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./IRewardDistributor.sol";
 import "./IPika.sol";
+import '../perp/IPikaPerp.sol';
 import '../lib/UniERC20.sol';
+import "hardhat/console.sol";
 
 // code adapted from https://github.com/trusttoken/smart-contracts/blob/master/contracts/truefi/TrueFarm.sol
 // and https://raw.githubusercontent.com/xvi10/gambit-contracts/master/contracts/tokens/YieldTracker.sol
@@ -24,6 +26,7 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
     address public governor;
     address public pikaToken;
     address public rewardToken;
+    address public pikaPerp;
 
     uint256 public previousTotalReward;
     uint256 public cumulativeRewardPerToken;
@@ -52,10 +55,9 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
         if (balanceWithReward == 0) {
             return claimableReward[account];
         }
+        uint256 pendingReward = (IPikaPerp(pikaPerp).getPendingReward()).mul(PRECISION);
         uint256 totalSupplyWithReward = IPika(pikaToken).totalSupplyWithReward();
-        uint256 currentTotalReward = IERC20(rewardToken).uniBalanceOf(address(this));
-        uint256 newReward = currentTotalReward.sub(previousTotalReward);
-        uint256 nextCumulativeRewardPerToken = cumulativeRewardPerToken.add(newReward.div(totalSupplyWithReward));
+        uint256 nextCumulativeRewardPerToken = cumulativeRewardPerToken.add(pendingReward.div(totalSupplyWithReward));
         return claimableReward[account].add(
             balanceWithReward.mul(nextCumulativeRewardPerToken.sub(previousCumulatedRewardPerToken[account])).div(PRECISION));
     }
@@ -74,16 +76,17 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
     }
 
     function updateRewards(address account) public override nonReentrant {
-        uint256 currentTotalReward = IERC20(rewardToken).uniBalanceOf(address(this));
-        uint256 newReward = currentTotalReward.sub(previousTotalReward);
-        previousTotalReward = currentTotalReward;
+        uint256 blockReward;
+        if (pikaPerp != address(0)) {
+            blockReward = IPikaPerp(pikaPerp).distributeReward();
+        }
 
         uint256 _cumulativeRewardPerToken = cumulativeRewardPerToken;
         uint256 totalSupplyWithReward = IPika(pikaToken).totalSupplyWithReward();
         // only update cumulativeRewardPerToken when there are stakers, i.e. when totalSupply > 0
         // if blockReward == 0, then there will be no change to cumulativeRewardPerToken
-        if (totalSupplyWithReward > 0 && newReward > 0) {
-            _cumulativeRewardPerToken = _cumulativeRewardPerToken.add(newReward.mul(PRECISION).div(totalSupplyWithReward));
+        if (totalSupplyWithReward > 0 && blockReward > 0) {
+            _cumulativeRewardPerToken = _cumulativeRewardPerToken.add(blockReward.div(totalSupplyWithReward));
             cumulativeRewardPerToken = _cumulativeRewardPerToken;
         }
 
@@ -104,4 +107,11 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
             previousCumulatedRewardPerToken[account] = _cumulativeRewardPerToken;
         }
     }
+
+    function setPikaPerp(address newPikaPerp) external onlyGovernor {
+        pikaPerp = newPikaPerp;
+    }
+
+    // function to receive ether as rewards
+    receive() external payable {}
 }

@@ -11,4 +11,10 @@ interface IPikaPerp {
 
     /// @dev Return the current mark price.
     function mark() external view returns (uint);
+
+    // @dev Send reward to reward distributor.
+    function distributeReward() external returns (uint256);
+
+    // @dev Get the reward amount that has not been distributed.
+    function getPendingReward() external view returns (uint256);
 }

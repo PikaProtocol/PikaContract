@@ -40,7 +40,7 @@ library PerpLib {
 	/// @param prevDecayTwapOI The TWAP open interest from the last update.
 	/// @param oiDecayPerSecond The exponential TWAP decay for open interest every second.
 	/// @param currentOI The current total open interest.
-	function getTwapOI(uint timeElapsed, uint prevDecayTwapOI, uint oiDecayPerSecond, uint currentOI) internal view returns (uint) {
+	function getTwapOI(uint timeElapsed, uint prevDecayTwapOI, uint oiDecayPerSecond, uint currentOI) internal pure returns (uint) {
 		uint total = 1e18;
 		uint each = oiDecayPerSecond;
 		while (timeElapsed > 0) {
