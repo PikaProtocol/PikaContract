@@ -1,13 +1,11 @@
-// import { ethers } from "hardhat"
-// import { expect } from "chai"
-const { expect, should } = require("chai")
+const { expect } = require("chai")
 const hre = require("hardhat")
 const { waffle } = require("hardhat")
-const { BigNumber, ethers } = require("ethers")
+const { BigNumber } = require("ethers")
 
 const provider = waffle.provider
 
-// Assert that actual is less than 0.001% difference from expected
+// Assert that actual is less than 1/accuracy difference from expected
 function assertAlmostEqual(actual, expected, accuracy = 100000) {
   const expectedBN = BigNumber.isBigNumber(expected) ? expected : BigNumber.from(expected)
   const actualBN = BigNumber.isBigNumber(actual) ? actual : BigNumber.from(actual)
@@ -36,36 +34,30 @@ describe("PikaPerp", function () {
 
   before(async function () {
     this.wallets = provider.getWallets()
-    // this.signers = await ethers.getSigners()
     this.alice = this.wallets[0]
     this.bob = this.wallets[1]
-    this.carol = this.wallets[2]
-    this.dev = this.wallets[3]
-    this.referrer = this.wallets[4]
-    this.rewardDistributor = this.wallets[5]
-    this.token = this.wallets[6]
-    // this.pikaLib = await hre.ethers.getContractFactory("PikaLib")
+    this.referrer = this.wallets[2]
+    this.rewardDistributor = this.wallets[3]
     this.perp = await hre.ethers.getContractFactory("PikaPerp")
-    this.tokenERC = await hre.ethers.getContractFactory("SimpleERC20")
-    this.linkoracle = await hre.ethers.getContractFactory("SimpleOracle")
-    this.pikacontract = await hre.ethers.getContractFactory("Pika")
-    this.perpLib = await hre.ethers.getContractFactory("PerpLib")
+    this.linkOracle = await hre.ethers.getContractFactory("SimpleOracle")
+    this.pikaContract = await hre.ethers.getContractFactory("Pika")
   })
 
   beforeEach(async function () {
     this.pikaPerp = await this.perp.deploy()
-    this.token = await this.tokenERC.deploy()
-    this.oracle = await this.linkoracle.deploy()
-    this.pika = await this.pikacontract.deploy(42)
+    this.oracle = await this.linkOracle.deploy()
+    this.pika = await this.pikaContract.deploy(42)
     this.uri = "URI"
     this.coeff = "50000000000000000000000000000000000000000000000" // 5e46, 5e10 * 1e18 * 1e18
     this.reserve = "10000000000000000000000000" // 1e25, 10e7 * 1e18, representing $10m usd
     this.baseReserve = "5000000000000000000000" // 5e21, 5e3 * 1e18, representing 5000 eth
     this.liquidationPerSec = "100000000000000000000"
     await this.oracle.setPrice(500000000000000) // set oracle price to 1/2000
+    // Set the token address to address 0, meaning this is the perpetual market for eth.
     await this.pikaPerp.initialize(
-      this.uri, this.pika.address, "0x0000000000000000000000000000000000000000", this.oracle.address, this.coeff, this.reserve, this.liquidationPerSec, this.rewardDistributor.address
+      this.uri, this.pika.address, "0x0000000000000000000000000000000000000000", this.oracle.address, this.coeff, this.reserve, this.liquidationPerSec
     )
+    await this.pikaPerp.setRewardDistributor(this.rewardDistributor.address)
     await this.pika.grantRole(await this.pika.MINTER_ROLE(), this.pikaPerp.address)
     await this.pika.grantRole(await this.pika.BURNER_ROLE(), this.pikaPerp.address)
   })
@@ -85,7 +77,7 @@ describe("PikaPerp", function () {
       const coeffValue = await this.pikaPerp.coeff()
       expect(coeffValue).to.equal(this.coeff)
 
-      const commissionOf = await this.pikaPerp.commissionOf(this.dev.address)
+      const commissionOf = await this.pikaPerp.commissionOf(this.alice.address)
       expect(commissionOf).to.equal("0")
 
       const decayPerSecond = await this.pikaPerp.decayPerSecond()
@@ -116,7 +108,7 @@ describe("PikaPerp", function () {
       const referrer = this.referrer.address
       const initialEthBalance = await provider.getBalance(this.alice.address)
       await this.pikaPerp.openLong(size, strike, minGet, referrer, {from: this.alice.address, value: "1000000000000000000", gasPrice: "0"}) // 1eth
-      // verity eth paid
+      // verify eth paid
       const expectedPay = BigNumber.from("600000000000000000")  // 0.6 eth , 1/1667 * 1000
       const expectedGet = BigNumber.from("498700129987001299") // 0.498.. eth, (5e3 - 5e10 / (1e7 + 1000)) * (1 - TRADING_FEE)
       const expectedGetWithoutFee = BigNumber.from("499950005000000000")
@@ -147,10 +139,9 @@ describe("PikaPerp", function () {
       await this.pikaPerp.poke()
       const newMark = await this.pikaPerp.mark()
       assertAlmostEqual(newMark, BigNumber.from("499988683084846"))  // 499988683084846 = 0.998 ^ 60 * 500000000000000 + (1 - 0.998 ^ 60) * 4.99900015E15
-      // check reward is transferred to rewardDistributor when the execute function is triggered after an hour
+      // test distributeReward method
       const initialRewardDistributorBalance = await provider.getBalance(this.rewardDistributor.address)
-      await provider.send("evm_increaseTime", [3600])
-      await this.pikaPerp.openLong(0, strike, 0, referrer, {from: this.alice.address, value: "1000000000000000000", gasPrice: "0"}) // 1eth
+      await this.pikaPerp.distributeReward()
       expect((await provider.getBalance(this.rewardDistributor.address)).sub(initialRewardDistributorBalance)).to.equal(pikaRewardAmount)
       // test increase position size for the same strike
       const additionalSize = "2000000000000000000000" // 2000 usd
@@ -210,8 +201,6 @@ describe("PikaPerp", function () {
 
       // closeLong
       const initialAliceBalance = await provider.getBalance(this.alice.address)
-      const initialReserve = await this.pikaPerp.reserve()
-      const initialCoeff = await this.pikaPerp.coeff()
       const maxPay = "600000000000000000" // 0.5 eth
       await this.pikaPerp.closeLong(size, strike, maxPay, this.referrer.address, {
         from: this.alice.address,
