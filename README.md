@@ -3,10 +3,6 @@ Contracts for the Pika Stablecoin and Pika Perpetual Swap Exchange.
 
 Documentation: https://pikaprotocol.gitbook.io/pika-protocol/  
 Medium: https://pikaprotocol.medium.com/  
-Website: https://www.pikaprotocol.com/   
-Twitter: https://twitter.com/PikaProtocol  
-Discord: http://discord.gg/R4CG94ZVYm  
-Telegram: http://t.me/PikaProtocol  
 
 ## Install Dependencies
 `npm install -g npx`
