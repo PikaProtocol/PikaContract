@@ -11,7 +11,6 @@ import "./IRewardDistributor.sol";
 import "./IPika.sol";
 import '../perp/IPikaPerp.sol';
 import '../lib/UniERC20.sol';
-import "hardhat/console.sol";
 
 // code adapted from https://github.com/trusttoken/smart-contracts/blob/master/contracts/truefi/TrueFarm.sol
 // and https://raw.githubusercontent.com/xvi10/gambit-contracts/master/contracts/tokens/YieldTracker.sol
@@ -55,7 +54,7 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
         if (balanceWithReward == 0) {
             return claimableReward[account];
         }
-        uint256 pendingReward = (IPikaPerp(pikaPerp).getPendingReward()).mul(PRECISION);
+        uint256 pendingReward = IPikaPerp(pikaPerp).getPendingReward().mul(PRECISION);
         uint256 totalSupplyWithReward = IPika(pikaToken).totalSupplyWithReward();
         uint256 nextCumulativeRewardPerToken = cumulativeRewardPerToken.add(pendingReward.div(totalSupplyWithReward));
         return claimableReward[account].add(
@@ -86,7 +85,7 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
         // only update cumulativeRewardPerToken when there are stakers, i.e. when totalSupply > 0
         // if blockReward == 0, then there will be no change to cumulativeRewardPerToken
         if (totalSupplyWithReward > 0 && blockReward > 0) {
-            _cumulativeRewardPerToken = _cumulativeRewardPerToken.add(blockReward.div(totalSupplyWithReward));
+            _cumulativeRewardPerToken = _cumulativeRewardPerToken.add(blockReward.mul(PRECISION).div(totalSupplyWithReward));
             cumulativeRewardPerToken = _cumulativeRewardPerToken;
         }
 

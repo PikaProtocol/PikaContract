@@ -153,11 +153,9 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   address payable public rewardDistributor;
 
   int public shift; // the shift is added to the AMM price as to make up the funding payment.
-  uint public pikaReward; // the trading fee reward for pika holders
-  int public override insurance; // the amount of token to back the exchange
-//  int public insurance;
+  uint public pikaReward; // the trading fee reward for pika holders.
+  int public override insurance; // the amount of token to back the exchange.
   int public override burden;
-//  int public burden;
 
   uint public maxSafeLongSlot; // The current highest slot that is safe for long positions.
   uint public minSafeShortSlot; // The current lowest slot that is safe for short positions.
@@ -166,7 +164,6 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   uint public lastTwapOIChangeTime; // Last timestamp when the twap open interest updates happened.
   uint public lastLiquidityChangeTime; // Last timestamp when the liquidity changes happened.
   uint public lastPoke; // Last timestamp when the poke action happened.
-//  uint public mark; // Mark price, as measured by exponential decay TWAP of spot prices.
   uint public override mark; // Mark price, as measured by exponential decay TWAP of spot prices.
 
   modifier onlyGovernor {

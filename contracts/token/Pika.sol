@@ -2,8 +2,6 @@
 
 pragma solidity 0.6.12;
 
-import "hardhat/console.sol";
-
 import "./IPika.sol";
 import "./IRewardDistributor.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
@@ -119,7 +117,7 @@ contract Pika is IPika, ERC20, AccessControl {
         rewardDistributors = newRewardDistributors;
     }
 
-    function recoverClaim(address account, address payable receiver) external onlyGovernor {
+    function recoverReward(address account, address payable receiver) external onlyGovernor {
         for (uint256 i = 0; i < rewardDistributors.length; i++) {
             IRewardDistributor(rewardDistributors[i]).claimRewards(account, receiver);
         }
