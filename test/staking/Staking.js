@@ -6,116 +6,204 @@ const { BigNumber, ethers } = require("ethers")
 
 const provider = waffle.provider
 
-function toWei (value) {
-    return ethers.utils.parseUnits(value, 18);
+// Assert that actual is less than 1/accuracy difference from expected
+function assertAlmostEqual(actual, expected, accuracy = 100000) {
+    const expectedBN = BigNumber.isBigNumber(expected) ? expected : BigNumber.from(expected)
+    const actualBN = BigNumber.isBigNumber(actual) ? actual : BigNumber.from(actual)
+    const diffBN = expectedBN.gt(actualBN) ? expectedBN.sub(actualBN) : actualBN.sub(expectedBN)
+    if (expectedBN.gt(0)) {
+        return expect(
+            diffBN).to.lt(expectedBN.div(BigNumber.from(accuracy.toString()))
+        )
+    }
+    return expect(
+        diffBN).to.lt(-1 * expectedBN.div(BigNumber.from(accuracy.toString()))
+    )
 }
 
-function fromWei (value) {
-    return ethers.utils.formatUnits(value, 18);
-}
-
-describe("StakingReward", function () {
+describe("Staking", function () {
 
     before(async function () {
         this.wallets = provider.getWallets()
-        this.alice = this.wallets[0]
-        this.bob = this.wallets[1]
-        this.charlie = this.wallets[2]
+        this.owner = this.wallets[0]
+        this.rewardDistributor = this.wallets[1]
+        this.stakingAccount1 = this.wallets[2]
+        this.stakingAccount2 = this.wallets[3]
         this.tokenERC = await hre.ethers.getContractFactory("SimpleERC20")
         this.pksContract = await hre.ethers.getContractFactory("PKS")
-        this.stakingRewardContract = await hre.ethers.getContractFactory("StakingReward")
+        this.stakingContract = await hre.ethers.getContractFactory("Staking")
     })
 
     beforeEach(async function () {
         this.rewardToken1 = await this.tokenERC.deploy(18)
         this.rewardToken2 = await this.tokenERC.deploy(18)
-        this.pks = await this.pksContract.deploy(this.alice.address, this.alice.address)
-        this.stakingReward = await this.stakingRewardContract.deploy(this.rewardToken1.address, 86400 * 7, this.alice.address, this.pks.address)
-        this.rewardToken1.mint(this.alice.address, "10000000000000000000000")
-        this.rewardToken2.mint(this.alice.address, "10000000000000000000000")
-        this.pks.mint(this.bob.address, "10000000000000000000000")
-        this.pks.mint(this.charlie.address, "10000000000000000000000")
+        this.pks = await this.pksContract.deploy(this.owner.address, this.owner.address)
+        this.staking = await this.stakingContract.deploy(this.rewardToken1.address, 86400 * 7, this.rewardDistributor.address, this.pks.address)
+        this.rewardToken1.mint(this.rewardDistributor.address, "10000000000000000000000")
+        this.rewardToken2.mint(this.rewardDistributor.address, "10000000000000000000000")
+        this.pks.mint(this.stakingAccount1.address, "10000000000000000000000")
+        this.pks.mint(this.stakingAccount2.address, "10000000000000000000000")
     })
 
 
-    describe("test stake and withdraw", async function(){
-        it("stake and withdraw", async function () {
-            console.log(await this.stakingReward.stakingRewards())
+    describe("test notifyRewardAmount", async function(){
+        it("notifyRewardAmount success", async function () {
+            await this.rewardToken1.connect(this.rewardDistributor).transfer(this.staking.address, "1000000000000000000000")
+            await this.staking.connect(this.rewardDistributor).notifyRewardAmount(0, "1000000000000000000000", {from: this.rewardDistributor.address})
+            const sr = await this.staking.stakingRewards(0)
+            expect(sr.periodFinish.sub(sr.lastUpdateTime)).to.be.equal(86400 * 7)
+            expect(sr.rewardRate).to.be.equal(BigNumber.from("1000000000000000000000").div(86400 * 7))
+        })
 
+        it("notifyRewardAmount success with leftover", async function () {
+            await this.rewardToken1.connect(this.rewardDistributor).transfer(this.staking.address, "1000000000000000000000")
+            await this.staking.connect(this.rewardDistributor).notifyRewardAmount(0, "1000000000000000000000", {from: this.rewardDistributor.address})
+            const sr1 = await this.staking.stakingRewards(0)
+            await this.rewardToken1.connect(this.rewardDistributor).transfer(this.staking.address, "1000000000000000000000")
+            await this.staking.connect(this.rewardDistributor).notifyRewardAmount(0, "1000000000000000000000", {from: this.rewardDistributor.address})
+            const sr2 = await this.staking.stakingRewards(0)
+            assertAlmostEqual(sr2.periodFinish.sub(sr2.lastUpdateTime), 86400 * 7)
+            assertAlmostEqual(sr2.rewardRate, sr1.rewardRate.mul(2))
+        })
 
+        it("notifyRewardAmount reward is too small", async function () {
+            await this.rewardToken1.connect(this.rewardDistributor).transfer(this.staking.address, "1000000000000000000000")
+            await expect(this.staking.connect(this.rewardDistributor).notifyRewardAmount(0, "1")).to.be.revertedWith("Reward is too small")
+        })
+
+        it("notifyRewardAmount reward is too big", async function () {
+            await this.rewardToken1.connect(this.rewardDistributor).transfer(this.staking.address, "1000000000000000000000")
+            await expect(this.staking.connect(this.rewardDistributor).notifyRewardAmount(0, "10000000000000000000000")).to.be.revertedWith("Reward is too big")
         })
     })
 
-    describe("Reward distribution", function () {
-        it("Test rewards distribution for multiple pika token holders", async function () {
-            await this.pika.grantRole(await this.pika.MINTER_ROLE(), this.alice.address)
-            await this.pika.grantRole(await this.pika.BURNER_ROLE(), this.alice.address)
-            await this.pika.mint(this.charlie.address, toWei("10"));
-            await this.pika.mint(this.bob.address, toWei("10"));
-            await this.rewardToken.mint(this.testPikaPerp1.address, toWei("1000"));
-            await this.testPikaPerp1.increaseReward(toWei("1000"))
+    describe("test setDuration", async function() {
+        it("setDuration before notifyReward", async function () {
+            await this.staking.connect(this.rewardDistributor).setDuration(0, 3600);
+            const sr = await this.staking.stakingRewards(0)
+            expect(sr.duration).to.be.equal("3600")
+        })
 
-            // 1. Test claimable.
-            expect(await this.rewardDistributor1.claimable(this.charlie.address)).to.be.equal(toWei("500"))
-            expect(await this.rewardDistributor1.claimable(this.bob.address)).to.be.equal(toWei("500"))
+        it("setDuration after notifyReward fail", async function () {
+            await this.rewardToken1.connect(this.rewardDistributor).transfer(this.staking.address, "1000000000000000000000")
+            await this.staking.connect(this.rewardDistributor).notifyRewardAmount(0, "1000000000000000000000", {from: this.rewardDistributor.address})
+            await expect(this.staking.connect(this.rewardDistributor).setDuration(0, 3600)).to.be.revertedWith("revert Not finished yet");
+        })
 
-            // 2. Test claimReward.
-            await this.pika.connect(this.charlie).claimRewards(this.charlie.address);
+        it("setDuration after notifyReward success", async function () {
+            await this.rewardToken1.connect(this.rewardDistributor).transfer(this.staking.address, "1000000000000000000000")
+            await this.staking.connect(this.rewardDistributor).notifyRewardAmount(0, "1000000000000000000000", {from: this.rewardDistributor.address})
+            await provider.send("evm_increaseTime", [86400 * 7])
+            await this.staking.connect(this.rewardDistributor).setDuration(0, 3600)
+            const sr = await this.staking.stakingRewards(0)
+            expect(sr.duration).to.be.equal("3600")
+        })
+    })
 
-            expect(await this.rewardToken.balanceOf(this.charlie.address)).to.be.equal(toWei("500"))
-            expect(await this.rewardToken.balanceOf(this.bob.address)).to.be.equal(toWei("0"))
-            expect(await this.rewardDistributor1.claimable(this.charlie.address)).to.be.equal(toWei("0"))
-            expect(await this.rewardDistributor1.claimable(this.bob.address)).to.be.equal(toWei("500"))
+    describe("test stake, withdraw, claimReward, exit", async function() {
+        it("single reward", async function () {
+            await this.rewardToken1.connect(this.rewardDistributor).transfer(this.staking.address, "1000000000000000000000")
+            await this.staking.connect(this.rewardDistributor).notifyRewardAmount(0, "1000000000000000000000", {from: this.rewardDistributor.address})
+            const sr1 = await this.staking.stakingRewards(0)
 
-            // 3. Test claimable and claimReward after new reward is added to the distributor.
-            await this.rewardToken.mint(this.testPikaPerp1.address, toWei("1000"));
-            await this.testPikaPerp1.increaseReward(toWei("1000"))
+            // stakingAccount1 stake
+            await this.pks.connect(this.stakingAccount1).approve(this.staking.address, "10000000000000000000000")
+            await this.staking.connect(this.stakingAccount1).stake("5000000000000000000000") // stake half of balance
+            expect(await this.staking.balanceOf(this.stakingAccount1.address)).to.be.equal("5000000000000000000000")
 
-            expect(await this.rewardDistributor1.claimable(this.charlie.address)).to.be.equal(toWei("500"))
-            expect(await this.rewardDistributor1.claimable(this.bob.address)).to.be.equal(toWei("1000"))
+            // 1 hour later stakingAccount1 check rewards
+            await provider.send("evm_increaseTime", [3600])
+            await provider.send("evm_mine")
+            console.log((await this.staking.rewardPerToken(0)).toString())
+            const stakingAccount1Earned = await this.staking.earned(0, this.stakingAccount1.address);
+            console.log(stakingAccount1Earned.toString(), (await this.staking.earned(0, this.stakingAccount1.address)).toString())
+            assertAlmostEqual(stakingAccount1Earned, sr1.rewardRate.mul(3600), 1000)
 
-            await this.pika.connect(this.bob).claimRewards(this.bob.address);
-            expect(await this.rewardToken.balanceOf(this.charlie.address)).to.be.equal(toWei("500"))
-            expect(await this.rewardToken.balanceOf(this.bob.address)).to.be.equal(toWei("1000"))
-            expect(await this.rewardDistributor1.claimable(this.charlie.address)).to.be.equal(toWei("500"))
-            expect(await this.rewardDistributor1.claimable(this.bob.address)).to.be.equal(toWei("0"))
+            // withdraw half
+            await this.staking.connect(this.stakingAccount1).withdraw("2500000000000000000000")
+            expect(await this.staking.balanceOf(this.stakingAccount1.address)).to.be.equal("2500000000000000000000")
 
-            // 4. Test burn token.
-            await this.pika.burn(this.bob.address, toWei("5")); // After burning 5, bob has 5 token, and totalSupply is 15.
-            // After the new reward is added, the new reward only goes to the new pika token holder.
-            await this.rewardToken.mint(this.testPikaPerp1.address, toWei("900"));
-            await this.testPikaPerp1.increaseReward(toWei("900"))
-            expect(await this.rewardDistributor1.claimable(this.charlie.address)).to.be.equal(toWei("1100")) // previous 500 + 900 * 2/3
-            expect(await this.rewardDistributor1.claimable(this.bob.address)).to.be.equal(toWei("300")) // 900/3
+            // stakingAccount2 stake the same amount as stakingAccount1's current staked balance
+            await this.pks.connect(this.stakingAccount2).approve(this.staking.address, "10000000000000000000000")
+            await this.staking.connect(this.stakingAccount2).stake("2500000000000000000000")
+            expect(await this.staking.balanceOf(this.stakingAccount2.address)).to.be.equal("2500000000000000000000")
+            expect(await this.staking.totalSupply()).to.be.equal("5000000000000000000000")
 
-            // 5. Test add and remove no reward account
-            await this.pika.addToNoRewardAccounts(this.bob.address)
-            await this.rewardToken.mint(this.testPikaPerp1.address, toWei("1000"));
-            await this.testPikaPerp1.increaseReward(toWei("1000"))
-            expect(await this.rewardDistributor1.claimable(this.charlie.address)).to.be.equal(toWei("2100")) // previous 1100 + 1000
-            expect(await this.rewardDistributor1.claimable(this.bob.address)).to.be.equal(toWei("300")) // no additional reward
+            // 1 hour later check rewards
+            await provider.send("evm_increaseTime", [3600])
+            await provider.send("evm_mine")
+            const newSr1 = await this.staking.stakingRewards(0)
+            const newStakingAccount1Earned = await this.staking.earned(0, this.stakingAccount1.address)
+            const stakingAccount2Earned = await this.staking.earned(0, this.stakingAccount2.address)
+            assertAlmostEqual(newStakingAccount1Earned.sub(stakingAccount1Earned), newSr1.rewardRate.mul(3600).div(2), 100)
+            assertAlmostEqual(stakingAccount2Earned, newSr1.rewardRate.mul(3600).div(2), 100)
 
-            await this.pika.removeFromNoRewardAccounts(this.bob.address)
-            await this.rewardToken.mint(this.testPikaPerp1.address, toWei("900"));
-            await this.testPikaPerp1.increaseReward(toWei("900"))
-            expect(await this.rewardDistributor1.claimable(this.charlie.address)).to.be.equal(toWei("2700")) // previous 2100 + 600
-            expect(await this.rewardDistributor1.claimable(this.bob.address)).to.be.equal(toWei("600")) // previous 300 + 300
+            // claim reward for stakingAccount1
+            await this.staking.connect(this.stakingAccount1).getReward(0)
+            assertAlmostEqual(await this.rewardToken1.balanceOf(this.stakingAccount1.address), newStakingAccount1Earned, 1000)
 
-            // 6. Test pika token transfer.
-            // After pika token is transferred, the previous rewards still belongs to the old account.
-            await this.pika.connect(this.charlie).transfer(this.bob.address, toWei("10"))
-            expect(await this.rewardDistributor1.claimable(this.charlie.address)).to.be.equal(toWei("2700"))
-            expect(await this.rewardDistributor1.claimable(this.bob.address)).to.be.equal(toWei("600"))
-            // After the new reward is added, the new reward only goes to the new pika token holder.
-            await this.rewardToken.mint(this.testPikaPerp1.address, toWei("1000"));
-            await this.testPikaPerp1.increaseReward(toWei("900"))
-            expect(await this.rewardDistributor1.claimable(this.charlie.address)).to.be.equal(toWei("2700"))
-            expect(await this.rewardDistributor1.claimable(this.bob.address)).to.be.equal(toWei("1500"))
+            // exit for stakingAccount2
+            await this.staking.connect(this.stakingAccount2).exit()
+            assertAlmostEqual(await this.rewardToken1.balanceOf(this.stakingAccount2.address), stakingAccount2Earned, 1000)
+            expect(await this.staking.totalSupply()).to.be.equal("2500000000000000000000") // stakingAccount1 still have staked balance
+        })
 
-            await this.pika.connect(this.charlie).claimRewards(this.charlie.address);
-            await this.pika.connect(this.bob).claimRewards(this.bob.address);
-            expect(await this.rewardToken.balanceOf(this.charlie.address)).to.be.equal(toWei("3200")) // previous 500 + 2700
-            expect(await this.rewardToken.balanceOf(this.bob.address)).to.be.equal(toWei("2500")) // previous 1000 + 1500
+        it("multiple reward", async function () {
+            await this.rewardToken1.connect(this.rewardDistributor).transfer(this.staking.address, "1000000000000000000000")
+            await this.staking.connect(this.rewardDistributor).notifyRewardAmount(0, "1000000000000000000000", {from: this.rewardDistributor.address})
+            const sr1 = await this.staking.stakingRewards(0)
+            await this.staking.addRewardToken(this.rewardToken2.address, 86400 * 7, this.rewardDistributor.address);
+            await this.rewardToken2.connect(this.rewardDistributor).transfer(this.staking.address, "1000000000000000000000")
+            await this.staking.connect(this.rewardDistributor).notifyRewardAmount(1, "1000000000000000000000", {from: this.rewardDistributor.address})
+            const sr2 = await this.staking.stakingRewards(1)
+
+            // stakingAccount1 stake
+            await this.pks.connect(this.stakingAccount1).approve(this.staking.address, "10000000000000000000000")
+            await this.staking.connect(this.stakingAccount1).stake("5000000000000000000000") // stake half of balance
+            expect(await this.staking.balanceOf(this.stakingAccount1.address)).to.be.equal("5000000000000000000000")
+
+            // 1 hour later stakingAccount1 check rewards
+            await provider.send("evm_increaseTime", [3600])
+            await provider.send("evm_mine")
+            const stakingAccount1Reward1Earned = await this.staking.earned(0, this.stakingAccount1.address);
+            const stakingAccount1Reward2Earned = await this.staking.earned(1, this.stakingAccount1.address);
+            assertAlmostEqual(stakingAccount1Reward1Earned, sr1.rewardRate.mul(3600), 1000)
+            assertAlmostEqual(stakingAccount1Reward2Earned, sr2.rewardRate.mul(3600), 1000)
+
+            // withdraw half
+            await this.staking.connect(this.stakingAccount1).withdraw("2500000000000000000000")
+            expect(await this.staking.balanceOf(this.stakingAccount1.address)).to.be.equal("2500000000000000000000")
+
+            // stakingAccount2 stake the same amount as stakingAccount1's current staked balance
+            await this.pks.connect(this.stakingAccount2).approve(this.staking.address, "10000000000000000000000")
+            await this.staking.connect(this.stakingAccount2).stake("2500000000000000000000")
+            expect(await this.staking.balanceOf(this.stakingAccount2.address)).to.be.equal("2500000000000000000000")
+            expect(await this.staking.totalSupply()).to.be.equal("5000000000000000000000")
+
+            // 1 hour later check rewards
+            await provider.send("evm_increaseTime", [3600])
+            await provider.send("evm_mine")
+            const newSr1 = await this.staking.stakingRewards(0)
+            const newSr2 = await this.staking.stakingRewards(0)
+            const newStakingAccount1Reward1Earned = await this.staking.earned(0, this.stakingAccount1.address)
+            const stakingAccount2Reward1Earned = await this.staking.earned(0, this.stakingAccount2.address)
+            const newStakingAccount1Reward2Earned = await this.staking.earned(1, this.stakingAccount1.address)
+            const stakingAccount2Reward2Earned = await this.staking.earned(1, this.stakingAccount2.address)
+            assertAlmostEqual(newStakingAccount1Reward1Earned.sub(stakingAccount1Reward1Earned), newSr1.rewardRate.mul(3600).div(2), 100)
+            assertAlmostEqual(stakingAccount2Reward1Earned, newSr1.rewardRate.mul(3600).div(2), 100)
+            assertAlmostEqual(newStakingAccount1Reward2Earned.sub(stakingAccount1Reward2Earned), newSr2.rewardRate.mul(3600).div(2), 100)
+            assertAlmostEqual(stakingAccount2Reward2Earned, newSr2.rewardRate.mul(3600).div(2), 100)
+
+            // claim reward for stakingAccount1
+            await this.staking.connect(this.stakingAccount1).getAllRewards()
+            assertAlmostEqual(await this.rewardToken1.balanceOf(this.stakingAccount1.address), newStakingAccount1Reward1Earned, 1000)
+            assertAlmostEqual(await this.rewardToken2.balanceOf(this.stakingAccount1.address), newStakingAccount1Reward1Earned, 1000)
+
+            // exit for stakingAccount2
+            await this.staking.connect(this.stakingAccount2).exit()
+            assertAlmostEqual(await this.rewardToken1.balanceOf(this.stakingAccount2.address), stakingAccount2Reward1Earned, 1000)
+            assertAlmostEqual(await this.rewardToken2.balanceOf(this.stakingAccount2.address), stakingAccount2Reward2Earned, 1000)
+            expect(await this.staking.totalSupply()).to.be.equal("2500000000000000000000") // stakingAccount1 still have staked balance
         })
     })
 })
