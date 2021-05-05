@@ -1,25 +1,9 @@
 
 const { expect } = require("chai")
 const hre = require("hardhat")
-const { waffle, web3 } = require("hardhat")
-const { BigNumber, ethers } = require("ethers")
+const { waffle } = require("hardhat")
 
 const provider = waffle.provider
-
-// Assert that actual is less than 1/accuracy difference from expected
-function assertAlmostEqual(actual, expected, accuracy = 100000) {
-  const expectedBN = BigNumber.isBigNumber(expected) ? expected : BigNumber.from(expected)
-  const actualBN = BigNumber.isBigNumber(actual) ? actual : BigNumber.from(actual)
-  const diffBN = expectedBN.gt(actualBN) ? expectedBN.sub(actualBN) : actualBN.sub(expectedBN)
-  if (expectedBN.gt(0)) {
-    return expect(
-        diffBN).to.lt(expectedBN.div(BigNumber.from(accuracy.toString()))
-    )
-  }
-  return expect(
-      diffBN).to.lt(-1 * expectedBN.div(BigNumber.from(accuracy.toString()))
-  )
-}
 
 describe("PKS", function () {
 
@@ -33,8 +17,6 @@ describe("PKS", function () {
 
   beforeEach(async function () {
     this.pks = await this.pksContract.deploy(this.owner.address, this.owner.address)
-    // this.pks.mint(this.stakingAccount1.address, "10000000000000000000000")
-    // this.pks.mint(this.stakingAccount2.address, "10000000000000000000000")
   })
 
 
