@@ -1,0 +1,46 @@
+pragma solidity 0.6.12;
+
+import "@openzeppelin/contracts/math/Math.sol";
+import "@openzeppelin/contracts/math/SafeMath.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+
+contract StakingTokenWrapper {
+    using SafeMath for uint256;
+    using SafeERC20 for IERC20;
+    using SafeERC20 for ERC20;
+
+    ERC20 public stakingToken;
+
+    uint256 private _totalSupply;
+    mapping(address => uint256) private _balances;
+
+    event Transfer(address indexed from, address indexed to, uint256 value);
+
+    constructor(ERC20 _stakingToken) public {
+        stakingToken = _stakingToken;
+    }
+
+    function totalSupply() public view returns (uint256) {
+        return _totalSupply;
+    }
+
+    function balanceOf(address account) public view returns (uint256) {
+        return _balances[account];
+    }
+
+    function stake(uint256 amount) virtual public {
+        _totalSupply = _totalSupply.add(amount);
+        _balances[msg.sender] = _balances[msg.sender].add(amount);
+        stakingToken.safeTransferFrom(msg.sender, address(this), amount);
+        emit Transfer(address(0), msg.sender, amount);
+    }
+
+    function withdraw(uint256 amount) virtual public {
+        _totalSupply = _totalSupply.sub(amount);
+        _balances[msg.sender] = _balances[msg.sender].sub(amount, "Withdraw amount exceeds balance");
+        stakingToken.safeTransfer(msg.sender, amount);
+        emit Transfer(msg.sender, address(0), amount);
+    }
+}
