@@ -127,7 +127,6 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   uint public safeThreshold; // buffer for liquidation
   uint public spotMarkThreshold;
   uint public decayPerSecond;
-  uint public maxShiftChangePerSecond;
   uint public maxPokeElapsed;
 
   uint public reserve0; // The initial virtual reserve for base tokens.
@@ -199,11 +198,10 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     tradingFee = 0.0025e18; // 0.25% of notional value
     referrerCommission = 0.10e18; // 10% of trading fee
     pikaRewardRatio = 0.20e18; // 20% of trading fee
-    fundingAdjustThreshold = 1.015e18; // 1.5% threshold
+    fundingAdjustThreshold = 0.005e18; // 0.5% threshold
     safeThreshold = 0.93e18; // 7% buffer for liquidation
     spotMarkThreshold = 1.05e18; // 5% consistency requirement
     decayPerSecond = 0.998e18; // 99.8% exponential TWAP decay
-    maxShiftChangePerSecond = uint(0.01e18) / uint(1 days); // 1% per day cap
     maxPokeElapsed = 1 hours; // 1 hour cap
     coeff = _coeff;
     reserve0 = _reserve0;
@@ -419,14 +417,18 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @dev Update the shift price shift factor.
   /// @param timeElapsed The number of seconds since last shift update.
   function _updateShift(uint timeElapsed) internal {
-    uint target = oracle.getPrice();
+    uint index = oracle.getPrice();
     int change = 0;
-    if (mark.fdiv(fundingAdjustThreshold) > target) {
-      change = mark.mul(timeElapsed).toInt256().mul(-1).fmul(maxShiftChangePerSecond);
-    } else if (mark.fmul(fundingAdjustThreshold) < target) {
-      change = mark.mul(timeElapsed).toInt256().fmul(maxShiftChangePerSecond);
+    uint ratio = mark > index ? (mark.sub(index)).fdiv(index) : (index.sub(mark)).fdiv(index);
+    if (ratio < fundingAdjustThreshold) {
+      return;
+    }
+    if (mark > index) {
+      // shift spot price to lower
+      change = mark.mul(timeElapsed).toInt256().mul(-1).fmul(ratio.div(uint(1 days)));
     } else {
-      return; // nothing to do here
+      // shift spot price to higher
+      change = mark.mul(timeElapsed).toInt256().fmul(ratio.div(uint(1 days)));
     }
     int prevShift = shift;
     int nextShift = prevShift.add(change);
@@ -743,10 +745,9 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
 
 
   // @dev setters for per second parameters. Combine the setters to one function to reduce contract size.
-  function setParametersPerSec(uint nextLiquidationPerSec, uint newDecayPerSecond, uint newMaxShiftChangePerSecond) external onlyGovernor {
+  function setParametersPerSec(uint nextLiquidationPerSec, uint newDecayPerSecond) external onlyGovernor {
     liquidationPerSec = nextLiquidationPerSec;
     decayPerSecond = newDecayPerSecond;
-    maxShiftChangePerSecond = newMaxShiftChangePerSecond;
   }
 
   // @dev setters for thresholds parameters. Combine the setters to one function to reduce contract size.

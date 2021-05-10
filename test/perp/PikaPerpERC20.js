@@ -399,8 +399,7 @@ describe("PikaPerp", function () {
       const liquidationPerSecond = "100000000000000000"
       // Set liquidationPerSecond to a very small number
       const decayPerSecond = await this.pikaPerp.decayPerSecond()
-      const maxShiftChangePerSecond = await this.pikaPerp.maxShiftChangePerSecond()
-      this.pikaPerp.setParametersPerSec(liquidationPerSecond, decayPerSecond, maxShiftChangePerSecond) // 0.1 usd per second
+      this.pikaPerp.setParametersPerSec(liquidationPerSecond, decayPerSecond) // 0.1 usd per second
       await this.pikaPerp.openLong(longSize, longStrike, minGet, this.referrer.address, {
         from: this.alice.address
       }) // 1token
@@ -471,8 +470,7 @@ describe("PikaPerp", function () {
       const liquidationPerSecond = "100000000000000000"
       // Set liquidationPerSecond to a very small number
       const decayPerSecond = await this.pikaPerp.decayPerSecond()
-      const maxShiftChangePerSecond = await this.pikaPerp.maxShiftChangePerSecond()
-      this.pikaPerp.setParametersPerSec(liquidationPerSecond, decayPerSecond, maxShiftChangePerSecond) // 0.1 usd per second
+      this.pikaPerp.setParametersPerSec(liquidationPerSecond, decayPerSecond) // 0.1 usd per second
       await this.pikaPerp.openShort(shortSize, shortStrike, maxPay, this.referrer.address, {
         from: this.alice.address
       }) // 1token
