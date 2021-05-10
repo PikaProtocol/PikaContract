@@ -452,8 +452,7 @@ describe("PikaPerp", function () {
       const liquidationPerSecond = "100000000000000000"
       // Set liquidationPerSecond to a very small number
       const decayPerSecond = await this.pikaPerp.decayPerSecond()
-      const maxShiftChangePerSecond = await this.pikaPerp.maxShiftChangePerSecond()
-      this.pikaPerp.setParametersPerSec(liquidationPerSecond, decayPerSecond, maxShiftChangePerSecond) // 0.1 usd per second
+      this.pikaPerp.setParametersPerSec(liquidationPerSecond, decayPerSecond) // 0.1 usd per second
       await this.pikaPerp.openLong(longSize, longStrike, minGet, this.referrer.address, {
         from: this.alice.address,
         value: "1000000000000000000",
@@ -532,8 +531,7 @@ describe("PikaPerp", function () {
       const liquidationPerSecond = "100000000000000000"
       // Set liquidationPerSecond to a very small number
       const decayPerSecond = await this.pikaPerp.decayPerSecond()
-      const maxShiftChangePerSecond = await this.pikaPerp.maxShiftChangePerSecond()
-      this.pikaPerp.setParametersPerSec(liquidationPerSecond, decayPerSecond, maxShiftChangePerSecond) // 0.1 usd per second
+      this.pikaPerp.setParametersPerSec(liquidationPerSecond, decayPerSecond) // 0.1 usd per second
       await this.pikaPerp.openShort(shortSize, shortStrike, maxPay, this.referrer.address, {
         from: this.alice.address,
         value: "1000000000000000000",
@@ -573,10 +571,10 @@ describe("PikaPerp", function () {
       const minGet = "300000000000000000" // 0.3 eth
       const strike = await this.pikaPerp.getStrikeFromLeverage("5000000000000000000", true)  // the strike for 5x long is 1667
       const referrer = this.referrer.address
-      // set oracle price to 1/1667, which is more than 2.5% from 1/2000
+      // set oracle price to 1/1667, which is more than 0.5% from 1/2000
       await this.oracle.setPrice(600000000000000)
       const initialEthBalance = await provider.getBalance(this.alice.address)
-      const maxShiftChangePerSecond = await this.pikaPerp.maxShiftChangePerSecond()
+      const shiftChangePerSecond = BigNumber.from(((((1 / 1666.666 - 1/2000) / (1 / 1666.666)) * 1e18) / 86400).toFixed(0))
       const mark = await this.pikaPerp.mark()
       await provider.send("evm_increaseTime", [3600])
       await this.pikaPerp.openLong(size, strike, minGet, referrer, {
@@ -586,17 +584,17 @@ describe("PikaPerp", function () {
       }) // 1eth
       // verity eth paid
       const shift = await this.pikaPerp.shift()
-      const expectedShift = maxShiftChangePerSecond.mul(3600).mul(mark).div("1000000000000000000")
+      const expectedShift = shiftChangePerSecond.mul(3600).mul(mark).div("1000000000000000000")
       assertAlmostEqual(shift, expectedShift, 1000)
       const expectedPay = BigNumber.from("600000000000000000")  // 0.6 eth = 1/1667 * 1000
-      const expectedGet = BigNumber.from("498907942500000000") // 0.4989079425 eth = (5e3 - 5e10 / (1e7 + 1000) + (shift * 1000)) * (1 - TRADING_FEE)
+      const expectedGet = BigNumber.from("502163671700000000") // 0.5021636717 eth = (5e3 - 5e10 / (1e7 + 1000) + (shift * 1000)) * (1 - TRADING_FEE)
       const expectedEthPaid = expectedPay.sub(expectedGet)
       const currentEthBalance = await provider.getBalance(this.alice.address)
       const ethPaid = (initialEthBalance.sub(currentEthBalance)).toString()
       assertAlmostEqual(ethPaid, expectedEthPaid)
       // check new spot price
       const newSpot = await this.pikaPerp.getSpotPx()
-      assertAlmostEqual(newSpot, 5.001083483E14) // 5e10 / ((1e7 + 1000)*(1e7 + 1000)) + shift = 0.0005001083483
+      assertAlmostEqual(newSpot, 5.033722372E14) // 5e10 / ((1e7 + 1000)*(1e7 + 1000)) + shift = 0.0005001083483
     })
 
     it("should openLong success with negative shift", async function () {
@@ -607,7 +605,7 @@ describe("PikaPerp", function () {
       // set oracle price to 1/2500, which is less than 2.5% from 1/2000
       await this.oracle.setPrice(400000000000000)
       const initialEthBalance = await provider.getBalance(this.alice.address)
-      const maxShiftChangePerSecond = await this.pikaPerp.maxShiftChangePerSecond()
+      const shiftChangePerSecond = BigNumber.from(((((1/2500 - 1 / 2000) / (1 / 2500)) * 1e18) / 86400).toFixed(0))
       const mark = await this.pikaPerp.mark()
       await provider.send("evm_increaseTime", [3600])
       await this.pikaPerp.openLong(size, strike, minGet, referrer, {
@@ -617,17 +615,17 @@ describe("PikaPerp", function () {
       }) // 1eth
       // verity eth paid
       const shift = await this.pikaPerp.shift()
-      const expectedShift = maxShiftChangePerSecond.mul(3600).mul(mark).mul(-1).div("1000000000000000000")
+      const expectedShift = shiftChangePerSecond.mul(3600).mul(mark).div("1000000000000000000")
       assertAlmostEqual(expectedShift, shift, 1000)
       const expectedPay = BigNumber.from("600000000000000000")  // 0.6 eth = 1/1667 * 1000
-      const expectedGet = BigNumber.from("498492317500000000") // 0.4984923175 eth = (5e3 - 5e10 / (1e7 + 1000) + (shift * 1000)) * (1 - TRADING_FEE)
+      const expectedGet = BigNumber.from("493504817500000000") // 0.4935048175 eth = (5e3 - 5e10 / (1e7 + 1000) + (shift * 1000)) * (1 - TRADING_FEE)
       const expectedEthPaid = expectedPay.sub(expectedGet)
       const currentEthBalance = await provider.getBalance(this.alice.address)
       const ethPaid = (initialEthBalance.sub(currentEthBalance)).toString()
       assertAlmostEqual(ethPaid, expectedEthPaid)
       // check new spot price
       const newSpot = await this.pikaPerp.getSpotPx()
-      assertAlmostEqual(newSpot, 4.996916817E14) // 5e10 / ((1e7 + 1000)*(1e7 + 1000)) + shift = 0.0004996916817
+      assertAlmostEqual(newSpot, 4.946916817E14) // 5e10 / ((1e7 + 1000)*(1e7 + 1000)) + shift = 0.0004996916817
     })
 
     it("should openShort success with positive shift", async function () {
@@ -638,7 +636,7 @@ describe("PikaPerp", function () {
       // set oracle price to 1/1667, which is more than 2.5% from the 1/2000
       await this.oracle.setPrice(600000000000000)
       const initialEthBalance = await provider.getBalance(this.alice.address)
-      const maxShiftChangePerSecond = await this.pikaPerp.maxShiftChangePerSecond()
+      const shiftChangePerSecond = BigNumber.from(((((1 / 1666.666 - 1/2000) / (1 / 1666.666)) * 1e18) / 86400).toFixed(0))
       const mark = await this.pikaPerp.mark()
       await provider.send("evm_increaseTime", [3600])
       await this.pikaPerp.openShort(size, strike, maxPay, referrer, {
@@ -648,17 +646,17 @@ describe("PikaPerp", function () {
       }) // 1eth
       // verity eth paid
       const shift = await this.pikaPerp.shift()
-      const expectedShift = maxShiftChangePerSecond.mul(3600).mul(mark).div("1000000000000000000")
+      const expectedShift = shiftChangePerSecond.mul(3600).mul(mark).div("1000000000000000000")
       assertAlmostEqual(shift, expectedShift, 1000)
       const expectedGet = BigNumber.from("400000000000000000")  // 0.4 eth = 1/2500 * 1000
-      const expectedPay = BigNumber.from("501508984200000000") // 0.5015089842 eth = ((5e10 / (1e7 - 1000) - 5e3) + shift * 1000) * (1 + TRADING_FEE)
+      const expectedPay = BigNumber.from("504781032800000000") // 0.5047810328 eth = ((5e10 / (1e7 - 1000) - 5e3) + shift * 1000) * (1 + TRADING_FEE)
       const expectedEthPaid = expectedPay.sub(expectedGet)
       const currentEthBalance = await provider.getBalance(this.alice.address)
       const ethPaid = initialEthBalance.sub(currentEthBalance)
       assertAlmostEqual(ethPaid, expectedEthPaid)
       // check new spot price
       const newSpot = await this.pikaPerp.getSpotPx()
-      assertAlmostEqual(newSpot, 5.003083483E14) // 5e10 / ((1e7 - 1000)*(1e7 - 1000)) + shift = 0.0005003083483
+      assertAlmostEqual(newSpot, 5.035722372E14) // 5e10 / ((1e7 - 1000)*(1e7 - 1000)) + shift = 0.0005003083483
     })
 
     it("should openShort success with negative shift", async function () {
@@ -669,7 +667,7 @@ describe("PikaPerp", function () {
       // set oracle price to 1/2500, which is less than 2.5% from 1/2000
       await this.oracle.setPrice(400000000000000)
       const initialEthBalance = await provider.getBalance(this.alice.address)
-      const maxShiftChangePerSecond = await this.pikaPerp.maxShiftChangePerSecond()
+      const shiftChangePerSecond = BigNumber.from(((((1/2500 - 1 / 2000) / (1 / 2500)) * 1e18) / 86400).toFixed(0))
       const mark = await this.pikaPerp.mark()
       await provider.send("evm_increaseTime", [3600])
       await this.pikaPerp.openShort(size, strike, maxPay, referrer, {
@@ -679,10 +677,10 @@ describe("PikaPerp", function () {
       }) // 1eth
       // verity eth paid
       const shift = await this.pikaPerp.shift()
-      const expectedShift = maxShiftChangePerSecond.mul(3600).mul(mark).mul(-1).div("1000000000000000000")
+      const expectedShift = shiftChangePerSecond.mul(3600).mul(mark).div("1000000000000000000")
       assertAlmostEqual(shift, expectedShift, 1000)
       const expectedGet = BigNumber.from("400000000000000000")  // 0.4 eth = 1/2500 * 1000
-      const expectedPay = BigNumber.from("501091275800000000") // 0.5010912758 eth = ((5e10 / (1e7 - 1000) - 5e3) + shift * 1000) * (1 + TRADING_FEE)
+      const expectedPay = BigNumber.from("496078775800000000") // 0.4960787758 eth = ((5e10 / (1e7 - 1000) - 5e3) + shift * 1000) * (1 + TRADING_FEE)
       const expectedPayWithoutFee = BigNumber.from("499841671700000000") // 0.4998416717 eth = (5e10 / (1e7 - 1000) - 5e3) + shift * 1000
       const expectedEthPaid = expectedPay.sub(expectedGet)
       const currentEthBalance = await provider.getBalance(this.alice.address)
@@ -690,7 +688,7 @@ describe("PikaPerp", function () {
       assertAlmostEqual(ethPaid, expectedEthPaid)
       // check new spot price
       const newSpot = await this.pikaPerp.getSpotPx()
-      assertAlmostEqual(newSpot, 4.998916817E14) // 5e10 / ((1e7 - 1000)*(1e7 - 1000)) + shift = 0.0004998916817
+      assertAlmostEqual(newSpot, 4.948916817E14) // 5e10 / ((1e7 - 1000)*(1e7 - 1000)) + shift = 0.0004998916817
     })
   })
 
@@ -942,10 +940,9 @@ describe("PikaPerp", function () {
     })
 
     it("should set value setLiquidationPerSec method", async function () {
-      await this.pikaPerp.setParametersPerSec("10", "10", "10")
+      await this.pikaPerp.setParametersPerSec("10", "10")
       expect(await this.pikaPerp.liquidationPerSec()).to.equal("10")
       expect(await this.pikaPerp.decayPerSecond()).to.equal("10")
-      expect(await this.pikaPerp.maxShiftChangePerSecond()).to.equal("10")
     })
 
     it("should set value setTradingFee method", async function () {

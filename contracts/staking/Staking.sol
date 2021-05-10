@@ -9,8 +9,6 @@ import "@openzeppelin/contracts/utils/Address.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "./StakingTokenWrapper.sol";
-import "hardhat/console.sol";
-
 
 // Modified https://github.com/Synthetixio/synthetix/blob/develop/contracts/StakingRewards.sol
 // to support multiple types of reward tokens.
@@ -57,12 +55,9 @@ contract Staking is StakingTokenWrapper, Ownable {
 
     function rewardPerToken(uint i) public view returns (uint256) {
         StakingReward storage tr = stakingRewards[i];
-        console.log("block time", block.timestamp);
         if (totalSupply() == 0) {
             return tr.rewardPerTokenStored;
         }
-        console.log("last applicable", lastTimeRewardApplicable(i));
-        console.log("last update time", tr.lastUpdateTime);
         return tr.rewardPerTokenStored.add(
             lastTimeRewardApplicable(i)
             .sub(tr.lastUpdateTime)

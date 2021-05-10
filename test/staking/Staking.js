@@ -114,9 +114,7 @@ describe("Staking", function () {
             // 1 hour later stakingAccount1 check rewards
             await provider.send("evm_increaseTime", [3600])
             await provider.send("evm_mine")
-            console.log((await this.staking.rewardPerToken(0)).toString())
             const stakingAccount1Earned = await this.staking.earned(0, this.stakingAccount1.address);
-            console.log(stakingAccount1Earned.toString(), (await this.staking.earned(0, this.stakingAccount1.address)).toString())
             assertAlmostEqual(stakingAccount1Earned, sr1.rewardRate.mul(3600), 1000)
 
             // withdraw half
