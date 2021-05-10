@@ -64,6 +64,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     uint spotPx, // The price of the virtual AMM.
     uint mark, // The mark price.
     uint indexPx, // The oracle price.
+    int shift, //  The amount added to the AMM price as to make up the funding payment.
     int insurance, // The current insurance amount.
     uint tokenBalance // The current token balance of the protocol.
   );
@@ -143,8 +144,8 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   uint public dailyVolume; // today's trading volume
   uint public prevDailyVolume; // previous day's trading volume
   uint public volumeChangeThreshold; // example: 1.1e18, 110%. If the difference between dailyVolume and prevDailyVolume is larger than (1 - threshold), liquidity will be updated.
-  bool isLiquidityDynamicByOI;
-  bool isLiquidityDynamicByVolume;
+  bool public isLiquidityDynamicByOI;
+  bool public isLiquidityDynamicByVolume;
 
   address public governor;
   address public pendingGovernor;
@@ -198,7 +199,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     tradingFee = 0.0025e18; // 0.25% of notional value
     referrerCommission = 0.10e18; // 10% of trading fee
     pikaRewardRatio = 0.20e18; // 20% of trading fee
-    fundingAdjustThreshold = 1.025e18; // 2.5% threshold
+    fundingAdjustThreshold = 1.015e18; // 1.5% threshold
     safeThreshold = 0.93e18; // 7% buffer for liquidation
     spotMarkThreshold = 1.05e18; // 5% consistency requirement
     decayPerSecond = 0.998e18; // 99.8% exponential TWAP decay
@@ -211,7 +212,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     liquidityChangePerSec = uint(0.005e18) / uint(1 days); // 0.5% per day cap for the change triggered by open interest and trading volume respectively, which mean 1% cap in total.
     smallOIDecayPerSecond = 0.99999e18; // 99.999% exponential TWAP decay
     largeOIDecayPerSecond = 0.999999e18; // 99.9999% exponential TWAP decay.
-    OIChangeThreshold = 1.05e18; // 110%
+    OIChangeThreshold = 1.05e18; // 105%
     volumeChangeThreshold = 1.2e18; // 120%
     isLiquidityDynamicByOI = false;
     isLiquidityDynamicByVolume = false;
@@ -336,7 +337,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     }
     // 4. Check spot price and mark price consistency.
     uint spotPx = getSpotPx();
-    emit Execute(msg.sender, actions, pay, get, fee, spotPx, mark, oracle.getPrice(), insurance, token.uniBalanceOf(address(this)));
+    emit Execute(msg.sender, actions, pay, get, fee, spotPx, mark, oracle.getPrice(), shift, insurance, token.uniBalanceOf(address(this)));
     require(spotPx.fmul(spotMarkThreshold) > mark, 'slippage is too high');
     require(spotPx.fdiv(spotMarkThreshold) < mark, 'slippage is too high');
   }
