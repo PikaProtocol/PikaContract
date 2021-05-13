@@ -2,8 +2,9 @@ require("@nomiclabs/hardhat-waffle");
 require('@openzeppelin/hardhat-upgrades');
 require("solidity-coverage");
 require("@nomiclabs/hardhat-web3");
+require("@nomiclabs/hardhat-etherscan");
 // require("hardhat-gas-reporter");
-const { infuraApiKey, mnemonic } = require('./secrets.json');
+const { infuraApiKey, mnemonic, etherscanApiKey } = require('./secrets.json');
 
 // You need to export an object to set up your config
 // Go to https://hardhat.org/config/ to learn more
@@ -24,6 +25,9 @@ module.exports = {
             url: `https://kovan.infura.io/v3/${infuraApiKey}`,
             accounts: {mnemonic: mnemonic}
         }
+    },
+    etherscan: {
+        apiKey:`${etherscanApiKey}`
     },
     solidity: {
         version: "0.6.12",
