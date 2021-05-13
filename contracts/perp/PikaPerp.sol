@@ -142,7 +142,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   uint public OIChangeThreshold; // example: 1.05e18, 105%. If the difference between smallDecayTwapOI and largeDecayTwapOI is larger than threshold, liquidity will be updated.
   uint public dailyVolume; // today's trading volume
   uint public prevDailyVolume; // previous day's trading volume
-  uint public volumeChangeThreshold; // example: 1.1e18, 110%. If the difference between dailyVolume and prevDailyVolume is larger than (1 - threshold), liquidity will be updated.
+  uint public volumeChangeThreshold; // example: 1.2e18, 120%. If the difference between dailyVolume and prevDailyVolume is larger than threshold), liquidity will be updated.
   bool public isLiquidityDynamicByOI;
   bool public isLiquidityDynamicByVolume;
 
@@ -614,11 +614,11 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     uint nextReserve = nextReserve0.add(reserve).sub(reserve0);
     int prevVal = coeff.div(reserve).toInt256().sub(coeff.div(reserve0).toInt256());
     int nextVal = nextCoeff.div(nextReserve).toInt256().sub(nextCoeff.div(nextReserve0).toInt256());
+    emit LiquidityChanged(coeff, reserve0, reserve, nextCoeff, nextReserve0, nextReserve, prevVal.sub(nextVal));
     insurance = insurance.add(prevVal).sub(nextVal);
     coeff = nextCoeff;
     reserve0 = nextReserve0;
     reserve = nextReserve;
-    emit LiquidityChanged(coeff, reserve0, reserve, nextCoeff, nextReserve0, nextReserve, prevVal.sub(nextVal));
   }
 
   function distributeReward() external override returns (uint256) {
