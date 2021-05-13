@@ -55,7 +55,7 @@ describe("PikaPerp", function () {
     await this.oracle.setPrice(500000000000000) // set oracle price to 1/2000
     // Set the token address to address 0, meaning this is the perpetual market for eth.
     await this.pikaPerp.initialize(
-      this.uri, this.pika.address, "0x0000000000000000000000000000000000000000", this.oracle.address, this.coeff, this.reserve, this.liquidationPerSec
+      this.uri, this.pika.address, "0x0000000000000000000000000000000000000000", this.oracle.address, this.coeff, this.reserve, this.reserve, this.liquidationPerSec
     )
     await this.pikaPerp.setRewardDistributor(this.rewardDistributor.address)
     await this.pika.grantRole(await this.pika.MINTER_ROLE(), this.pikaPerp.address)

@@ -57,7 +57,7 @@ describe("PikaPerp", function () {
     await this.oracle.setPrice(500000000000000) // set oracle price to 1/2000
     // Set the token address to the erc20 address.
     await this.pikaPerp.initialize(
-        this.uri, this.pika.address, this.token.address, this.oracle.address, this.coeff, this.reserve, this.liquidationPerSec
+        this.uri, this.pika.address, this.token.address, this.oracle.address, this.coeff, this.reserve, this.reserve, this.liquidationPerSec
     )
     this.token.mint(this.alice.address, "10000000000000000000000000")
     this.token.approve(this.pikaPerp.address, "100000000000000000000000000000000000000000000000000")
