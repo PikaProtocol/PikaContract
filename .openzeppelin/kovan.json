@@ -870,6 +870,441 @@
           }
         }
       }
+    },
+    "fe4f66e0a86041894840fd090909ad5c3eea156732639fed92c9e10309858a03": {
+      "address": "0xf709052f17E14eCBD52E91D75C77e340B75A64A3",
+      "txHash": "0x2d350b25567ad195d4f8d33fb7adb86fe25863af1fc32c9449639aae4eb53481",
+      "layout": {
+        "storage": [
+          {
+            "contract": "Initializable",
+            "label": "_initialized",
+            "type": "t_bool",
+            "src": "@openzeppelin/contracts-upgradeable/proxy/Initializable.sol:24"
+          },
+          {
+            "contract": "Initializable",
+            "label": "_initializing",
+            "type": "t_bool",
+            "src": "@openzeppelin/contracts-upgradeable/proxy/Initializable.sol:29"
+          },
+          {
+            "contract": "ContextUpgradeable",
+            "label": "__gap",
+            "type": "t_array(t_uint256)50_storage",
+            "src": "@openzeppelin/contracts-upgradeable/GSN/ContextUpgradeable.sol:31"
+          },
+          {
+            "contract": "ERC165Upgradeable",
+            "label": "_supportedInterfaces",
+            "type": "t_mapping(t_bytes4,t_bool)",
+            "src": "@openzeppelin/contracts-upgradeable/introspection/ERC165Upgradeable.sol:23"
+          },
+          {
+            "contract": "ERC165Upgradeable",
+            "label": "__gap",
+            "type": "t_array(t_uint256)49_storage",
+            "src": "@openzeppelin/contracts-upgradeable/introspection/ERC165Upgradeable.sol:59"
+          },
+          {
+            "contract": "ERC1155Upgradeable",
+            "label": "_balances",
+            "type": "t_mapping(t_uint256,t_mapping(t_address,t_uint256))",
+            "src": "@openzeppelin/contracts-upgradeable/token/ERC1155/ERC1155Upgradeable.sol:27"
+          },
+          {
+            "contract": "ERC1155Upgradeable",
+            "label": "_operatorApprovals",
+            "type": "t_mapping(t_address,t_mapping(t_address,t_bool))",
+            "src": "@openzeppelin/contracts-upgradeable/token/ERC1155/ERC1155Upgradeable.sol:30"
+          },
+          {
+            "contract": "ERC1155Upgradeable",
+            "label": "_uri",
+            "type": "t_string_storage",
+            "src": "@openzeppelin/contracts-upgradeable/token/ERC1155/ERC1155Upgradeable.sol:33"
+          },
+          {
+            "contract": "ERC1155Upgradeable",
+            "label": "__gap",
+            "type": "t_array(t_uint256)47_storage",
+            "src": "@openzeppelin/contracts-upgradeable/token/ERC1155/ERC1155Upgradeable.sol:420"
+          },
+          {
+            "contract": "ReentrancyGuardUpgradeable",
+            "label": "_status",
+            "type": "t_uint256",
+            "src": "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol:37"
+          },
+          {
+            "contract": "ReentrancyGuardUpgradeable",
+            "label": "__gap",
+            "type": "t_array(t_uint256)49_storage",
+            "src": "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol:67"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "supplyOf",
+            "type": "t_mapping(t_uint256,t_uint256)",
+            "src": "contracts/perp/PikaPerp.sol:112"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "longOffsetOf",
+            "type": "t_mapping(t_uint256,t_uint256)",
+            "src": "contracts/perp/PikaPerp.sol:113"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "shortOffsetOf",
+            "type": "t_mapping(t_uint256,t_uint256)",
+            "src": "contracts/perp/PikaPerp.sol:114"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "referrerOf",
+            "type": "t_mapping(t_address,t_address)",
+            "src": "contracts/perp/PikaPerp.sol:115"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "commissionOf",
+            "type": "t_mapping(t_address,t_uint256)",
+            "src": "contracts/perp/PikaPerp.sol:116"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "pika",
+            "type": "t_address",
+            "src": "contracts/perp/PikaPerp.sol:118"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "token",
+            "type": "t_contract(IERC20)4093",
+            "src": "contracts/perp/PikaPerp.sol:119"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "oracle",
+            "type": "t_contract(IOracle)5984",
+            "src": "contracts/perp/PikaPerp.sol:120"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "status",
+            "type": "t_enum(MarketStatus)6074",
+            "src": "contracts/perp/PikaPerp.sol:121"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "tradingFee",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:123"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "referrerCommission",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:124"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "pikaRewardRatio",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:125"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "fundingAdjustThreshold",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:126"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "safeThreshold",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:127"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "spotMarkThreshold",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:128"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "decayPerSecond",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:129"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "maxPokeElapsed",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:130"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "reserve0",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:132"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "coeff",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:133"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "reserve",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:134"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "liquidationPerSec",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:135"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "liquidityChangePerSec",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:136"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "totalOI",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:137"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "smallDecayTwapOI",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:138"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "largeDecayTwapOI",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:139"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "smallOIDecayPerSecond",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:140"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "largeOIDecayPerSecond",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:141"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "OIChangeThreshold",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:142"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "dailyVolume",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:143"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "prevDailyVolume",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:144"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "volumeChangeThreshold",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:145"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "isLiquidityDynamicByOI",
+            "type": "t_bool",
+            "src": "contracts/perp/PikaPerp.sol:146"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "isLiquidityDynamicByVolume",
+            "type": "t_bool",
+            "src": "contracts/perp/PikaPerp.sol:147"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "governor",
+            "type": "t_address",
+            "src": "contracts/perp/PikaPerp.sol:149"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "pendingGovernor",
+            "type": "t_address",
+            "src": "contracts/perp/PikaPerp.sol:150"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "guardian",
+            "type": "t_address",
+            "src": "contracts/perp/PikaPerp.sol:151"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "pendingGuardian",
+            "type": "t_address",
+            "src": "contracts/perp/PikaPerp.sol:152"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "rewardDistributor",
+            "type": "t_address_payable",
+            "src": "contracts/perp/PikaPerp.sol:153"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "shift",
+            "type": "t_int256",
+            "src": "contracts/perp/PikaPerp.sol:155"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "pikaReward",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:156"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "insurance",
+            "type": "t_int256",
+            "src": "contracts/perp/PikaPerp.sol:157"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "burden",
+            "type": "t_int256",
+            "src": "contracts/perp/PikaPerp.sol:158"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "maxSafeLongSlot",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:160"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "minSafeShortSlot",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:161"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "lastDailyVolumeUpdateTime",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:163"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "lastTwapOIChangeTime",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:164"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "lastLiquidityChangeTime",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:165"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "lastPoke",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:166"
+          },
+          {
+            "contract": "PikaPerp",
+            "label": "mark",
+            "type": "t_uint256",
+            "src": "contracts/perp/PikaPerp.sol:167"
+          }
+        ],
+        "types": {
+          "t_mapping(t_uint256,t_uint256)": {
+            "label": "mapping(uint256 => uint256)"
+          },
+          "t_uint256": {
+            "label": "uint256"
+          },
+          "t_mapping(t_address,t_address)": {
+            "label": "mapping(address => address)"
+          },
+          "t_address": {
+            "label": "address"
+          },
+          "t_mapping(t_address,t_uint256)": {
+            "label": "mapping(address => uint256)"
+          },
+          "t_contract(IERC20)4093": {
+            "label": "contract IERC20"
+          },
+          "t_contract(IOracle)5984": {
+            "label": "contract IOracle"
+          },
+          "t_enum(MarketStatus)6074": {
+            "label": "enum PikaPerp.MarketStatus",
+            "members": [
+              "Normal",
+              "NoMint",
+              "NoAction"
+            ]
+          },
+          "t_bool": {
+            "label": "bool"
+          },
+          "t_address_payable": {
+            "label": "address payable"
+          },
+          "t_int256": {
+            "label": "int256"
+          },
+          "t_array(t_uint256)49_storage": {
+            "label": "uint256[49]"
+          },
+          "t_mapping(t_uint256,t_mapping(t_address,t_uint256))": {
+            "label": "mapping(uint256 => mapping(address => uint256))"
+          },
+          "t_mapping(t_address,t_mapping(t_address,t_bool))": {
+            "label": "mapping(address => mapping(address => bool))"
+          },
+          "t_mapping(t_address,t_bool)": {
+            "label": "mapping(address => bool)"
+          },
+          "t_string_storage": {
+            "label": "string"
+          },
+          "t_array(t_uint256)47_storage": {
+            "label": "uint256[47]"
+          },
+          "t_mapping(t_bytes4,t_bool)": {
+            "label": "mapping(bytes4 => bool)"
+          },
+          "t_bytes4": {
+            "label": "bytes4"
+          },
+          "t_array(t_uint256)50_storage": {
+            "label": "uint256[50]"
+          }
+        }
+      }
     }
   },
   "admin": {
