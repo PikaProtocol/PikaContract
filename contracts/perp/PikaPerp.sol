@@ -208,7 +208,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     reserve0 = _reserve0;
     reserve = _reserve;
     liquidationPerSec = _liquidationPerSec;
-    liquidityChangePerSec = uint(0.005e18) / uint(1 days); // 0.5% per day cap for the change triggered by open interest and trading volume respectively, which mean 1% cap in total.
+    liquidityChangePerSec = uint(0.002e18) / uint(1 days); // 0.2% per day cap for the change triggered by open interest and trading volume respectively, which mean 1% cap in total.
     smallOIDecayPerSecond = 0.99999e18; // 99.999% exponential TWAP decay
     largeOIDecayPerSecond = 0.999999e18; // 99.9999% exponential TWAP decay.
     OIChangeThreshold = 1.05e18; // 105%
@@ -623,6 +623,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   }
 
   function distributeReward() external override returns (uint256) {
+    require(msg.sender == rewardDistributor, "sender is not rewardDistributor");
     if (pikaReward > 0) {
       token.uniTransfer(rewardDistributor, pikaReward);
       emit RewardDistribute(rewardDistributor, pikaReward);
