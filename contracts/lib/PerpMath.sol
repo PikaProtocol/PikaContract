@@ -26,7 +26,7 @@ library PerpMath {
 		return lhs.mul(1e18) / rhs.toInt256();
 	}
 
-	function sqrt(uint x) internal pure returns  (uint y) {
+	function sqrt(uint x) internal pure returns (uint y) {
 		uint z = (x + 1) / 2;
 		y = x;
 		while (z < y) {

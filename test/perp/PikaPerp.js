@@ -55,7 +55,7 @@ describe("PikaPerp", function () {
     await this.oracle.setPrice(500000000000000) // set oracle price to 1/2000
     // Set the token address to address 0, meaning this is the perpetual market for eth.
     await this.pikaPerp.initialize(
-      this.uri, this.pika.address, "0x0000000000000000000000000000000000000000", this.oracle.address, this.coeff, this.reserve, this.liquidationPerSec
+      this.uri, this.pika.address, "0x0000000000000000000000000000000000000000", this.oracle.address, this.coeff, this.reserve, this.reserve, this.liquidationPerSec
     )
     await this.pikaPerp.setRewardDistributor(this.rewardDistributor.address)
     await this.pika.grantRole(await this.pika.MINTER_ROLE(), this.pikaPerp.address)
@@ -139,10 +139,6 @@ describe("PikaPerp", function () {
       await this.pikaPerp.poke()
       const newMark = await this.pikaPerp.mark()
       assertAlmostEqual(newMark, BigNumber.from("499988683084846"))  // 499988683084846 = 0.998 ^ 60 * 500000000000000 + (1 - 0.998 ^ 60) * 4.99900015E15
-      // test distributeReward method
-      const initialRewardDistributorBalance = await provider.getBalance(this.rewardDistributor.address)
-      await this.pikaPerp.distributeReward()
-      expect((await provider.getBalance(this.rewardDistributor.address)).sub(initialRewardDistributorBalance)).to.equal(pikaRewardAmount)
       // test increase position size for the same strike
       const additionalSize = "2000000000000000000000" // 2000 usd
       await this.pikaPerp.openLong(additionalSize, strike, minGet, referrer, {from: this.alice.address, value: "1000000000000000000", gasPrice: "0"}) // 1eth
@@ -846,7 +842,7 @@ describe("PikaPerp", function () {
       })
       await provider.send("evm_increaseTime", [18000]) // 5 hours
       await this.pikaPerp.poke()
-      assertAlmostEqual(await this.pikaPerp.getSpotPx(), expectedSpot2)
+      assertAlmostEqual(await this.pikaPerp.getSpotPx(), expectedSpot2, 10000)
       assertAlmostEqual(nextCoeff.sub(await this.pikaPerp.coeff()), expectedCoeffChange2, 100)
       expect(await this.pikaPerp.totalOI()).to.be.equal("0")
       expect(await this.pikaPerp.largeDecayTwapOI()).to.be.gt(await this.pikaPerp.smallDecayTwapOI())
