@@ -448,7 +448,8 @@ describe("PikaPerp", function () {
       const liquidationPerSecond = "100000000000000000"
       // Set liquidationPerSecond to a very small number
       const decayPerSecond = await this.pikaPerp.decayPerSecond()
-      this.pikaPerp.setParametersPerSec(liquidationPerSecond, decayPerSecond) // 0.1 usd per second
+      const liquidityChangePerSec = await this.pikaPerp.liquidityChangePerSec()
+      this.pikaPerp.setParametersPerSec(liquidationPerSecond, decayPerSecond, liquidityChangePerSec) // 0.1 usd per second
       await this.pikaPerp.openLong(longSize, longStrike, minGet, this.referrer.address, {
         from: this.alice.address,
         value: "1000000000000000000",
@@ -527,7 +528,8 @@ describe("PikaPerp", function () {
       const liquidationPerSecond = "100000000000000000"
       // Set liquidationPerSecond to a very small number
       const decayPerSecond = await this.pikaPerp.decayPerSecond()
-      this.pikaPerp.setParametersPerSec(liquidationPerSecond, decayPerSecond) // 0.1 usd per second
+      const liquidityChangePerSec = await this.pikaPerp.liquidityChangePerSec()
+      this.pikaPerp.setParametersPerSec(liquidationPerSecond, decayPerSecond, liquidityChangePerSec) // 0.1 usd per second
       await this.pikaPerp.openShort(shortSize, shortStrike, maxPay, this.referrer.address, {
         from: this.alice.address,
         value: "1000000000000000000",
@@ -936,9 +938,10 @@ describe("PikaPerp", function () {
     })
 
     it("should set value setLiquidationPerSec method", async function () {
-      await this.pikaPerp.setParametersPerSec("10", "10")
+      await this.pikaPerp.setParametersPerSec("10", "10", "10")
       expect(await this.pikaPerp.liquidationPerSec()).to.equal("10")
       expect(await this.pikaPerp.decayPerSecond()).to.equal("10")
+      expect(await this.pikaPerp.liquidityChangePerSec()).to.equal("10")
     })
 
     it("should set value setTradingFee method", async function () {

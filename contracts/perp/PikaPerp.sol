@@ -747,9 +747,10 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
 
 
   // @dev setters for per second parameters. Combine the setters to one function to reduce contract size.
-  function setParametersPerSec(uint nextLiquidationPerSec, uint newDecayPerSecond) external onlyGovernor {
-    liquidationPerSec = nextLiquidationPerSec;
+  function setParametersPerSec(uint newLiquidationPerSec, uint newDecayPerSecond, uint newLiquidityChangePerSec) external onlyGovernor {
+    liquidationPerSec = newLiquidationPerSec;
     decayPerSecond = newDecayPerSecond;
+    liquidityChangePerSec = newLiquidityChangePerSec;
   }
 
   // @dev setters for thresholds parameters. Combine the setters to one function to reduce contract size.
