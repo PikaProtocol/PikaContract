@@ -24,6 +24,12 @@ module.exports = {
         kovan: {
             url: `https://kovan.infura.io/v3/${infuraApiKey}`,
             accounts: {mnemonic: mnemonic}
+        },
+        arbitrum: {
+            url: 'https://kovan5.arbitrum.io/rpc',
+            chainId: 144545313136048,
+            accounts: {mnemonic: mnemonic},
+            gasPrice: 0
         }
     },
     etherscan: {
