@@ -40,6 +40,7 @@ contract RewardDistributor is IRewardDistributor, ReentrancyGuard {
     }
 
     constructor(address _pikaToken, address _rewardToken) public {
+        require(_pikaToken != address(0), "_pikaToken is a zero address");
         governor = msg.sender;
         pikaToken = _pikaToken;
         rewardToken = _rewardToken;
