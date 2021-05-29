@@ -15,7 +15,7 @@ Medium: https://pikaprotocol.medium.com/
 `npx hardhat test`
 
 ## Contract Addresses on Kovan Testnet  
-PikaPerp: 0x2075De1EB0BEDbdCf0f87BBdfEa55685117bA32f  
+PikaPerp: 0x27A6327fbBcE04D3471656e00c701E02f5c65C3A.   
 Pika: 0xb98b75eb42f6963e1932e392ea2521e03b5186c0  
 RewardDistributor: 0x101fd883c605cb420503756eb730eeb5f83f0c91  
 Oracle: 0x4A8fE451c5F2fDd08874a884115F2831E5B2606c  
