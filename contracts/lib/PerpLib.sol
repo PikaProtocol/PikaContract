@@ -54,4 +54,11 @@ library PerpLib {
 		uint next = uint(1e18).sub(total).fmul(currentOI);
 		return prev.add(next);
 	}
+
+	function getTradeAction(uint kind, uint size, uint strike) internal pure returns (uint[] memory){
+		uint action = kind | (getSlot(strike) << 2) | (size << 18);
+		uint[] memory actions = new uint[](1);
+		actions[0] = action;
+		return actions;
+	}
 }

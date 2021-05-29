@@ -350,7 +350,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @param referrer The address that refers this trader. Only relevant on the first call.
   function openLong(uint size, uint strike, uint minGet, address referrer) external payable returns (uint, uint) {
     // Mint short token of USD/TOKEN pair
-    return execute(getTradeAction(MintShort, size, strike), uint256(-1), minGet, referrer);
+    return execute(PerpLib.getTradeAction(MintShort, size, strike), uint256(-1), minGet, referrer);
   }
 
   /// @dev Close a long position of the contract, which is equivalent to closing a short position of the inverse pair.
@@ -360,7 +360,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @param referrer The address that refers this trader. Only relevant on the first call.
   function closeLong(uint size, uint strike, uint maxPay, address referrer) external returns (uint, uint) {
     // Burn short token of USD/TOKEN pair
-    return execute(getTradeAction(BurnShort, size, strike), maxPay, 0, referrer);
+    return execute(PerpLib.getTradeAction(BurnShort, size, strike), maxPay, 0, referrer);
   }
 
   /// @dev Open a SHORT position of the contract, which is equivalent to opening a long position of the inverse pair.
@@ -371,7 +371,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @param referrer The address that refers this trader. Only relevant on the first call.
   function openShort(uint size, uint strike, uint maxPay, address referrer) external payable returns (uint, uint) {
     // Mint long token of USD/TOKEN pair
-    return execute(getTradeAction(MintLong, size, strike), maxPay, 0, referrer);
+    return execute(PerpLib.getTradeAction(MintLong, size, strike), maxPay, 0, referrer);
   }
 
   /// @dev Close a long position of the contract, which is equivalent to closing a short position of the inverse pair.
@@ -381,7 +381,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @param referrer The address that refers this trader. Only relevant on the first call.
   function closeShort(uint size, uint strike, uint minGet, address referrer) external returns (uint, uint) {
     // Burn long token of USD/TOKEN pair
-    return execute(getTradeAction(BurnLong, size, strike), uint256(-1), minGet, referrer);
+    return execute(PerpLib.getTradeAction(BurnLong, size, strike), uint256(-1), minGet, referrer);
   }
 
   /// @dev Collect trading commission for the caller.
@@ -636,13 +636,6 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   }
 
   // ============ Getter Functions ============
-
-  function getTradeAction(uint kind, uint size, uint strike) public pure returns (uint[] memory){
-    uint action = kind | (PerpLib.getSlot(strike) << 2) | (size << 18);
-    uint[] memory actions = new uint[](1);
-    actions[0] = action;
-    return actions;
-  }
 
   /// @dev Return the active ident (slot with offset) for the given long price slot. The long refers to USD/TOKEN pair.
   /// @param slot The price slot to query.
