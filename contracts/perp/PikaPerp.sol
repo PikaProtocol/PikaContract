@@ -628,10 +628,10 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   function distributeReward() external override returns (uint256) {
     require(msg.sender == rewardDistributor, "sender is not rewardDistributor");
     if (pikaReward > 0) {
-      token.uniTransfer(rewardDistributor, pikaReward);
-      emit RewardDistribute(rewardDistributor, pikaReward);
       uint distributedReward = pikaReward;
       pikaReward = 0;
+      token.uniTransfer(rewardDistributor, distributedReward);
+      emit RewardDistribute(rewardDistributor, distributedReward);
       return distributedReward;
     }
     return 0;
