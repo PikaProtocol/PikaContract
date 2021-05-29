@@ -66,7 +66,9 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     uint indexPx, // The oracle price.
     int shift, //  The amount added to the AMM price as to make up the funding payment.
     int insurance, // The current insurance amount.
-    uint tokenBalance // The current token balance of the protocol.
+    uint commission, // The commission of this trade.
+    uint reward, // The reward for Pika holders.
+    uint timestamp // Current timestamp.
   );
 
   event Liquidate(
@@ -327,8 +329,9 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
       beneficiary = referrer;
       referrerOf[msg.sender] = referrer;
     }
+    uint commission = 0;
     if (beneficiary != address(0)) {
-      uint commission = referrerCommission.fmul(fee);
+      commission = referrerCommission.fmul(fee);
       commissionOf[beneficiary] = commissionOf[beneficiary].add(commission);
       insurance = insurance.add(fee.sub(commission).sub(reward).toInt256());
     } else {
@@ -336,7 +339,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     }
     // 4. Check spot price and mark price consistency.
     uint spotPx = getSpotPx();
-    emit Execute(msg.sender, actions, pay, get, fee, spotPx, mark, oracle.getPrice(), shift, insurance, token.uniBalanceOf(address(this)));
+    emit Execute(msg.sender, actions, pay, get, fee, spotPx, mark, oracle.getPrice(), shift, insurance, commission, reward, now);
     require(spotPx.fmul(spotMarkThreshold) > mark, 'slippage is too high');
     require(spotPx.fdiv(spotMarkThreshold) < mark, 'slippage is too high');
   }
@@ -366,7 +369,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   ///      For example, a short position of TOKEN/USD inverse contract can be viewed as long position of USD/ETH contract.
   /// @param size The size of the contract. One contract is close to 1 USD in value.
   /// @param strike The price which the leverage token is worth 0.
-  /// @param maxPay The maximum pay value in ETH the caller is willing to commit.
+  /// @param maxPay The maximum pay value in TOKEN the caller is willing to commit.
   /// @param referrer The address that refers this trader. Only relevant on the first call.
   function openShort(uint size, uint strike, uint maxPay, address referrer) external payable returns (uint, uint) {
     // Mint long token of USD/TOKEN pair
