@@ -191,6 +191,8 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     uint _reserve,
     uint _liquidationPerSec
   ) public initializer {
+    require(_pika != address(0), "_pika is a zero address");
+    require(address(_oracle) != address(0), "_oracle is a zero address");
     __ERC1155_init(uri);
     pika = _pika;
     token = _token;
