@@ -149,9 +149,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   bool public isLiquidityDynamicByVolume;
 
   address public governor;
-  address public pendingGovernor;
   address public guardian;
-  address public pendingGuardian;
   address payable public rewardDistributor;
 
   int public shift; // the shift is added to the AMM price as to make up the funding payment.
