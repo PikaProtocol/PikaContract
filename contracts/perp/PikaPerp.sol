@@ -66,7 +66,9 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     uint indexPx, // The oracle price.
     int shift, //  The amount added to the AMM price as to make up the funding payment.
     int insurance, // The current insurance amount.
-    uint tokenBalance // The current token balance of the protocol.
+    uint commission, // The commission of this trade.
+    uint reward, // The reward for Pika holders.
+    uint timestamp // Current timestamp.
   );
 
   event Liquidate(
@@ -147,9 +149,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   bool public isLiquidityDynamicByVolume;
 
   address public governor;
-  address public pendingGovernor;
   address public guardian;
-  address public pendingGuardian;
   address payable public rewardDistributor;
 
   int public shift; // the shift is added to the AMM price as to make up the funding payment.
@@ -191,6 +191,8 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     uint _reserve,
     uint _liquidationPerSec
   ) public initializer {
+    require(_pika != address(0), "_pika is a zero address");
+    require(address(_oracle) != address(0), "_oracle is a zero address");
     __ERC1155_init(uri);
     pika = _pika;
     token = _token;
@@ -327,8 +329,9 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
       beneficiary = referrer;
       referrerOf[msg.sender] = referrer;
     }
+    uint commission = 0;
     if (beneficiary != address(0)) {
-      uint commission = referrerCommission.fmul(fee);
+      commission = referrerCommission.fmul(fee);
       commissionOf[beneficiary] = commissionOf[beneficiary].add(commission);
       insurance = insurance.add(fee.sub(commission).sub(reward).toInt256());
     } else {
@@ -336,7 +339,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
     }
     // 4. Check spot price and mark price consistency.
     uint spotPx = getSpotPx();
-    emit Execute(msg.sender, actions, pay, get, fee, spotPx, mark, oracle.getPrice(), shift, insurance, token.uniBalanceOf(address(this)));
+    emit Execute(msg.sender, actions, pay, get, fee, spotPx, mark, oracle.getPrice(), shift, insurance, commission, reward, now);
     require(spotPx.fmul(spotMarkThreshold) > mark, 'slippage is too high');
     require(spotPx.fdiv(spotMarkThreshold) < mark, 'slippage is too high');
   }
@@ -349,7 +352,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @param referrer The address that refers this trader. Only relevant on the first call.
   function openLong(uint size, uint strike, uint minGet, address referrer) external payable returns (uint, uint) {
     // Mint short token of USD/TOKEN pair
-    return execute(getTradeAction(MintShort, size, strike), uint256(-1), minGet, referrer);
+    return execute(PerpLib.getTradeAction(MintShort, size, strike), uint256(-1), minGet, referrer);
   }
 
   /// @dev Close a long position of the contract, which is equivalent to closing a short position of the inverse pair.
@@ -359,18 +362,18 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @param referrer The address that refers this trader. Only relevant on the first call.
   function closeLong(uint size, uint strike, uint maxPay, address referrer) external returns (uint, uint) {
     // Burn short token of USD/TOKEN pair
-    return execute(getTradeAction(BurnShort, size, strike), maxPay, 0, referrer);
+    return execute(PerpLib.getTradeAction(BurnShort, size, strike), maxPay, 0, referrer);
   }
 
   /// @dev Open a SHORT position of the contract, which is equivalent to opening a long position of the inverse pair.
   ///      For example, a short position of TOKEN/USD inverse contract can be viewed as long position of USD/ETH contract.
   /// @param size The size of the contract. One contract is close to 1 USD in value.
   /// @param strike The price which the leverage token is worth 0.
-  /// @param maxPay The maximum pay value in ETH the caller is willing to commit.
+  /// @param maxPay The maximum pay value in TOKEN the caller is willing to commit.
   /// @param referrer The address that refers this trader. Only relevant on the first call.
   function openShort(uint size, uint strike, uint maxPay, address referrer) external payable returns (uint, uint) {
     // Mint long token of USD/TOKEN pair
-    return execute(getTradeAction(MintLong, size, strike), maxPay, 0, referrer);
+    return execute(PerpLib.getTradeAction(MintLong, size, strike), maxPay, 0, referrer);
   }
 
   /// @dev Close a long position of the contract, which is equivalent to closing a short position of the inverse pair.
@@ -380,7 +383,7 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   /// @param referrer The address that refers this trader. Only relevant on the first call.
   function closeShort(uint size, uint strike, uint minGet, address referrer) external returns (uint, uint) {
     // Burn long token of USD/TOKEN pair
-    return execute(getTradeAction(BurnLong, size, strike), uint256(-1), minGet, referrer);
+    return execute(PerpLib.getTradeAction(BurnLong, size, strike), uint256(-1), minGet, referrer);
   }
 
   /// @dev Collect trading commission for the caller.
@@ -625,23 +628,16 @@ contract PikaPerp is Initializable, ERC1155Upgradeable, ReentrancyGuardUpgradeab
   function distributeReward() external override returns (uint256) {
     require(msg.sender == rewardDistributor, "sender is not rewardDistributor");
     if (pikaReward > 0) {
-      token.uniTransfer(rewardDistributor, pikaReward);
-      emit RewardDistribute(rewardDistributor, pikaReward);
       uint distributedReward = pikaReward;
       pikaReward = 0;
+      token.uniTransfer(rewardDistributor, distributedReward);
+      emit RewardDistribute(rewardDistributor, distributedReward);
       return distributedReward;
     }
     return 0;
   }
 
   // ============ Getter Functions ============
-
-  function getTradeAction(uint kind, uint size, uint strike) public pure returns (uint[] memory){
-    uint action = kind | (PerpLib.getSlot(strike) << 2) | (size << 18);
-    uint[] memory actions = new uint[](1);
-    actions[0] = action;
-    return actions;
-  }
 
   /// @dev Return the active ident (slot with offset) for the given long price slot. The long refers to USD/TOKEN pair.
   /// @param slot The price slot to query.

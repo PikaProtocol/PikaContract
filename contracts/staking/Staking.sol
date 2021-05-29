@@ -75,7 +75,7 @@ contract Staking is StakingTokenWrapper, Ownable {
         .add(tr.rewards[account]);
     }
 
-    function stake(uint256 amount) override public updateReward(msg.sender) {
+    function stake(uint256 amount) override public notPaused updateReward(msg.sender) {
         require(amount > 0, "Cannot stake 0");
         super.stake(amount);
         emit Staked(msg.sender, amount);
