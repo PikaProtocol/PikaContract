@@ -19,6 +19,7 @@ contract StakingTokenWrapper {
     event Transfer(address indexed from, address indexed to, uint256 value);
 
     constructor(ERC20 _stakingToken) public {
+        require(address(_stakingToken) != address(0), "_stakingToken is a zero address");
         stakingToken = _stakingToken;
     }
 
