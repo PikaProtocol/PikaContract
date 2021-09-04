@@ -19,7 +19,8 @@ module.exports = {
         hardhat: {
             accounts: {
                 accountsBalance: "100000000000000000000000"
-            }
+            },
+            allowUnlimitedContractSize: true
         },
         kovan: {
             url: `https://kovan.infura.io/v3/${infuraApiKey}`,
@@ -31,6 +32,7 @@ module.exports = {
     },
     solidity: {
         version: "0.6.12",
+        docker: true,
         settings: {
             outputSelection: {
                 "*": {
