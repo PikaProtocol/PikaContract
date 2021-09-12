@@ -16,7 +16,8 @@ Medium: https://pikaprotocol.medium.com/
 
 ## Contract Addresses on Kovan Testnet  
 PikaPerp: 0xD56c7b84159f7f2e7C94045a2eE2e6416D192920  
-Pika: 0xb98b75eb42f6963e1932e392ea2521e03b5186c0   
+Pika: 0xb98b75eb42f6963e1932e392ea2521e03b5186c0
+PKS: 0xea9E5999eddaab9Ee42Dc9E7E696E3dFADaAe990
 RewardDistributor: 0x101fd883c605cb420503756eb730eeb5f83f0c91  
 Oracle: 0x4A8fE451c5F2fDd08874a884115F2831E5B2606c  
 TestETH: 0x56D1a99DF46d81fC0964Fa45e55D6BeE0D53b7CC   
