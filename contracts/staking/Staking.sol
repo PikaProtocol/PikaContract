@@ -1,18 +1,21 @@
-pragma solidity 0.6.12;
+pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts/math/Math.sol";
-import "@openzeppelin/contracts/math/SafeMath.sol";
+import "@openzeppelin/contracts/utils/math/Math.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/GSN/Context.sol";
+import "@openzeppelin/contracts/utils/Context.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
-import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "./StakingTokenWrapper.sol";
 
 // Modified https://github.com/Synthetixio/synthetix/blob/develop/contracts/StakingRewards.sol
 // to support multiple types of reward tokens.
 contract Staking is StakingTokenWrapper, Ownable {
+    using SafeMath for uint256;
+    using SafeERC20 for IERC20;
+    using SafeERC20 for ERC20;
 
     struct StakingReward {
         IERC20 rewardToken;
@@ -110,7 +113,7 @@ contract Staking is StakingTokenWrapper, Ownable {
     }
 
     function notifyRewardAmount(uint i, uint256 reward) external onlyRewardDistribution(i) updateReward(address(0)) {
-        require(reward < uint(-1).div(1e18), "Reward overflow");
+        require(reward < uint256(2**256 - 1).div(1e18), "Reward overflow");
 
         StakingReward storage tr = stakingRewards[i];
         uint256 duration = tr.duration;
@@ -180,7 +183,7 @@ contract Staking is StakingTokenWrapper, Ownable {
 
         // If applicable, set the last pause time.
         if (paused) {
-            lastPauseTime = now;
+            lastPauseTime = block.timestamp;
         }
 
         // Let everyone know that our pause state has changed.

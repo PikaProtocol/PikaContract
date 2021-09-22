@@ -1,10 +1,10 @@
 //SPDX-License-Identifier: MIT
 
-pragma solidity ^0.6.12;
+pragma solidity ^0.8.0;
 
 // Forked from UNI: https://etherscan.io/address/0x1f9840a85d5af5bf1d1762f925bdaddc4201f984#code
 
-import "@openzeppelin/contracts/math/SafeMath.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 
 contract PKS {
     /// @notice EIP-20 token name for this token
@@ -22,10 +22,10 @@ contract PKS {
     /// @notice Address which may mint new tokens
     address public minter;
 
-    /// @notice Allowance amounts on behalf of others
+    // Allowance amounts on behalf of others
     mapping (address => mapping (address => uint96)) internal allowances;
 
-    /// @notice Official record of token balances for each account
+    // Official record of token balances for each account
     mapping (address => uint96) internal balances;
 
     /// @notice A record of each accounts delegate
@@ -132,8 +132,8 @@ contract PKS {
      */
     function approve(address spender, uint rawAmount) external returns (bool) {
         uint96 amount;
-        if (rawAmount == uint(-1)) {
-            amount = uint96(-1);
+        if (rawAmount == uint256(2**256 - 1)) {
+            amount = uint96(2**96 - 1);
         } else {
             amount = safe96(rawAmount, "PKS::approve: amount exceeds 96 bits");
         }
@@ -156,8 +156,8 @@ contract PKS {
      */
     function permit(address owner, address spender, uint rawAmount, uint deadline, uint8 v, bytes32 r, bytes32 s) external {
         uint96 amount;
-        if (rawAmount == uint(-1)) {
-            amount = uint96(-1);
+        if (rawAmount == uint256(2**256 - 1)) {
+            amount = uint96(2**96 - 1);
         } else {
             amount = safe96(rawAmount, "PKS::permit: amount exceeds 96 bits");
         }
@@ -168,7 +168,7 @@ contract PKS {
         address signatory = ecrecover(digest, v, r, s);
         require(signatory != address(0), "PKS::permit: invalid signature");
         require(signatory == owner, "PKS::permit: unauthorized");
-        require(now <= deadline, "PKS::permit: signature expired");
+        require(block.timestamp <= deadline, "PKS::permit: signature expired");
 
         allowances[owner][spender] = amount;
 
@@ -208,7 +208,7 @@ contract PKS {
         uint96 spenderAllowance = allowances[src][spender];
         uint96 amount = safe96(rawAmount, "PKS::approve: amount exceeds 96 bits");
 
-        if (spender != src && spenderAllowance != uint96(-1)) {
+        if (spender != src && spenderAllowance != uint256(2**96 - 1)) {
             uint96 newAllowance = sub96(spenderAllowance, amount, "PKS::transferFrom: transfer amount exceeds spender allowance");
             allowances[src][spender] = newAllowance;
 
@@ -243,7 +243,7 @@ contract PKS {
         address signatory = ecrecover(digest, v, r, s);
         require(signatory != address(0), "PKS::delegateBySig: invalid signature");
         require(nonce == nonces[signatory]++, "PKS::delegateBySig: invalid nonce");
-        require(now <= expiry, "PKS::delegateBySig: signature expired");
+        require(block.timestamp <= expiry, "PKS::delegateBySig: signature expired");
         return _delegate(signatory, delegatee);
     }
 
@@ -371,7 +371,7 @@ contract PKS {
         return a - b;
     }
 
-    function getChainId() internal pure returns (uint) {
+    function getChainId() internal view returns (uint) {
         uint256 chainId;
         assembly { chainId := chainid() }
         return chainId;

@@ -1,11 +1,12 @@
 //SPDX-License-Identifier: MIT
 
-pragma solidity 0.6.12;
+pragma solidity ^0.8.0;
 
 import "./IPika.sol";
 import "./IRewardDistributor.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 
 //.----------------.  .----------------.  .----------------.  .----------------.
 //| .--------------. || .--------------. || .--------------. || .--------------. |
@@ -24,6 +25,7 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
  * @dev PIKA Stablecoin
  */
 contract Pika is IPika, ERC20, AccessControl {
+    using SafeMath for uint256;
     string public constant NAME = "Pika";
     string public constant SYMBOL = "PIKA";
     bytes public constant EIP712_REVISION = bytes("1");
