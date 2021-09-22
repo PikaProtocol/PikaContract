@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.0;
 
-import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
+import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV2V3Interface.sol";
 import './IPikaPerp.sol';
 import '../token/IPika.sol';
 
@@ -75,6 +75,7 @@ contract PikaPerpV2 is IPikaPerp {
     uint256 public pikaFee = 0.005e8; // 0.5%, fee to pay when close pika position
     uint256 public pikaRewardRatio = 0.20e8; // 20%, percent of trading fee to reward pika holders
     uint256 public pikaReward; // the trading fee reward for pika holders.
+    uint256 public checkBackRounds = 100; // number of rounds to check back to search for the first round with timestamp that is larger than target timestamp
     Vault private vault;
     address public pika; // The address of PIKA stablecoin.
     address payable public rewardDistributor;
@@ -302,7 +303,7 @@ contract PikaPerpV2 is IPikaPerp {
         }
 
         uint256 price = _calculatePriceWithFee(product.feed, uint256(product.fee), isLong, product.openInterestLong,
-            product.openInterestShort, uint256(product.maxExposure), amount);
+            product.openInterestShort, uint256(product.maxExposure), amount, 0);
 
         address user = msg.sender;
 
@@ -417,7 +418,7 @@ contract PikaPerpV2 is IPikaPerp {
         }
 
         uint256 price = _calculatePriceWithFee(product.feed, uint256(product.fee), !position.isLong, product.openInterestLong, product.openInterestShort,
-            uint256(product.maxExposure), margin * position.leverage / 10**8);
+            uint256(product.maxExposure), margin * position.leverage / 10**8, 0);
 
 
         uint256 pnl;
@@ -554,7 +555,7 @@ contract PikaPerpV2 is IPikaPerp {
     ) external {
         Product storage product = products[uint256(1)]; // eth product
         uint256 price = _calculatePriceWithFee(product.feed, uint256(product.fee), true, product.openInterestLong, product.openInterestShort,
-            uint256(product.maxExposure), amount / (getLatestPrice(product.feed, 0) * 10**8));
+            uint256(product.maxExposure), amount / (getPrice(product.feed, 0, 0) * 10**8), 0);
         uint256 margin = amount / price;
 
         uint256 pnl;
@@ -653,7 +654,7 @@ contract PikaPerpV2 is IPikaPerp {
             Product storage product = products[uint256(position.productId)];
 
             uint256 price = _calculatePriceWithFee(product.feed, uint256(product.fee), position.isLong, product.openInterestLong, product.openInterestShort,
-                uint256(product.maxExposure), position.margin * position.leverage / 10**8);
+                uint256(product.maxExposure), position.margin * position.leverage / 10**8, position.timestamp);
 
             if (block.timestamp - uint256(position.timestamp) >= uint256(product.settlementTime) || price != uint256(position.price)) {
                 _positionIds[i] = positionId;
@@ -683,7 +684,7 @@ contract PikaPerpV2 is IPikaPerp {
             Product storage product = products[uint256(position.productId)];
 
             uint256 price = _calculatePriceWithFee(product.feed, uint256(product.fee), position.isLong,product.openInterestLong, product.openInterestShort,
-                uint256(product.maxExposure), position.margin * position.leverage / 10**8);
+                uint256(product.maxExposure), position.margin * position.leverage / 10**8, position.timestamp);
 
             if (block.timestamp - uint256(position.timestamp) >= uint256(product.settlementTime) || price != uint256(position.price)) {
                 position.price = uint64(price);
@@ -729,7 +730,7 @@ contract PikaPerpV2 is IPikaPerp {
             Product storage product = products[uint256(position.productId)];
 
             uint256 price = _calculatePriceWithFee(product.feed, uint256(product.fee), !position.isLong, product.openInterestLong, product.openInterestShort,
-                uint256(product.maxExposure), position.margin * position.leverage / 10**8);
+                uint256(product.maxExposure), position.margin * position.leverage / 10**8, 0);
 
             // Local test
             // price = 20000*10**8;
@@ -831,9 +832,10 @@ contract PikaPerpV2 is IPikaPerp {
         return _stakes;
     }
 
-    function getLatestPrice(
+    function getPrice(
         address feed,
-        uint256 productId
+        uint256 productId,
+        uint256 blockTime
     ) public view returns (uint256) {
 
         // local test
@@ -846,18 +848,33 @@ contract PikaPerpV2 is IPikaPerp {
 
         require(feed != address(0), '!feed-error');
 
-        (
-        ,
-        int price,
-        ,
-        uint timeStamp,
+        int price;
+        uint timeStamp;
+        if (blockTime == 0) { // get latest round price
+            (
+            ,
+            price,
+            ,
+            timeStamp,
 
-        ) = AggregatorV3Interface(feed).latestRoundData();
+            ) = AggregatorV2V3Interface(feed).latestRoundData();
+        } else {
+            uint256 roundId = getRoundIdByTime(feed, blockTime);
+            (
+            ,
+            price,
+            ,
+            timeStamp,
+
+            ) = AggregatorV2V3Interface(feed).getRoundData(uint80(roundId));
+
+        }
+
 
         require(price > 0, '!price');
         require(timeStamp > 0, '!timeStamp');
 
-        uint8 decimals = AggregatorV3Interface(feed).decimals();
+        uint8 decimals = AggregatorV2V3Interface(feed).decimals();
 
         uint256 priceToReturn;
         if (decimals != 8) {
@@ -875,6 +892,24 @@ contract PikaPerpV2 is IPikaPerp {
         return pikaReward;
     }
 
+    function getRoundIdByTime(
+        address feed,
+        uint256 blockTime
+    ) public view returns(uint256) {
+        // use binary search to find the 1st round with larger timestamp than blockTime
+        uint256 high = AggregatorV2V3Interface(feed).latestRound();
+        uint256 low = high - checkBackRounds;
+        while (low != high) {
+            uint256 mid = (low + high) / 2;
+            if (AggregatorV2V3Interface(feed).getTimestamp(mid) <= blockTime) {
+                low = mid + 1;
+            } else {
+                high = mid;
+            }
+        }
+        return high;
+    }
+
     // Internal methods
 
     function _calculatePriceWithFee(
@@ -884,10 +919,11 @@ contract PikaPerpV2 is IPikaPerp {
         uint256 openInterestLong,
         uint256 openInterestShort,
         uint256 maxExposure,
-        uint256 amount
+        uint256 amount,
+        uint256 blockTime // if 0, calculate latest price
     ) internal view returns(uint256) {
 
-        uint256 oraclePrice = getLatestPrice(feed, 0);
+        uint256 oraclePrice = getPrice(feed, 0, blockTime);
         int256 shift = (int256(openInterestLong) - int256(openInterestShort)) * int256(maxShift) / int256(maxExposure);
 
         if (isLong) {
@@ -901,7 +937,6 @@ contract PikaPerpV2 is IPikaPerp {
             uint256 price = oraclePrice * slippage / (10**8);
             return price - price * fee / 10**4;
         }
-
     }
 
     function _calculateInterest(uint256 amount, uint256 timestamp, uint256 interest) internal view returns (uint256) {
@@ -1020,6 +1055,10 @@ contract PikaPerpV2 is IPikaPerp {
 
     function setPikaFee(uint newPikaFee) external onlyOwner {
         pikaFee = newPikaFee;
+    }
+
+    function setCheckBackRounds(uint newCheckBackRounds) external onlyOwner {
+        checkBackRounds = newCheckBackRounds;
     }
 
     function setOwner(address newOwner) external onlyOwner {
